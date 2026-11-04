@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
@@ -92,6 +93,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     sharedUrl: String? = null,
+    onExploreProfile: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -201,6 +203,34 @@ fun HomeScreen(
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Text("PASTE", color = IgPink, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+
+                        // Smart Profile Suggestion Pill
+                        val detectedProfileUser = remember(inputUrl) { extractUsernameIfProfile(inputUrl) }
+                        if (detectedProfileUser != null) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = DarkSurfaceElevated,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onExploreProfile(detectedProfileUser) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.PersonSearch, contentDescription = null, tint = IgPink, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Profile detected: @$detectedProfileUser • Tap to explore profile & reels",
+                                        color = TextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
                         }
 
@@ -626,5 +656,20 @@ fun LegalDisclaimerCard() {
             )
         }
     }
+}
+
+private fun extractUsernameIfProfile(input: String): String? {
+    val clean = input.trim()
+    if (clean.startsWith("@") && clean.length > 1 && !clean.contains(" ")) {
+        return clean.removePrefix("@")
+    }
+    val profilePattern = java.util.regex.Pattern.compile("(?:instagram\\.com|instagr\\.am)/([a-zA-Z0-9._]+)/?$")
+    val matcher = profilePattern.matcher(clean.substringBefore("?"))
+    if (matcher.find()) {
+        val user = matcher.group(1) ?: return null
+        val reserved = setOf("p", "reel", "reels", "stories", "tv", "explore", "direct", "accounts", "legal", "about")
+        if (user !in reserved) return user
+    }
+    return null
 }
 

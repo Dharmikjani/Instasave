@@ -24,13 +24,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.instasaver.app.core.gallery.GalleryScanner
@@ -67,14 +76,23 @@ fun GalleryScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<LocalSavedItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var selectedFilter by remember { mutableStateOf("All") }
     var playingItem by remember { mutableStateOf<LocalSavedItem?>(null) }
+    var previewPhotoItem by remember { mutableStateOf<LocalSavedItem?>(null) }
+
+    fun reloadGallery() {
+        isLoading = true
+        scope.launch {
+            items = GalleryScanner.loadSavedMedia(context)
+            isLoading = false
+        }
+    }
 
     LaunchedEffect(Unit) {
-        items = GalleryScanner.loadSavedMedia(context)
-        isLoading = false
+        reloadGallery()
     }
 
     val creators = remember(items) {
@@ -100,6 +118,10 @@ fun GalleryScreen(
                 Text("Saved Downloads", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("(${items.size})", color = IgPink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = { reloadGallery() }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = IgPink)
+                }
             }
 
             // Filter Chips (All, Videos, Photos, and Creator names)
@@ -150,6 +172,8 @@ fun GalleryScreen(
                             onClick = {
                                 if (item.isVideo) {
                                     playingItem = item
+                                } else {
+                                    previewPhotoItem = item
                                 }
                             },
                             onShare = {
@@ -171,6 +195,66 @@ fun GalleryScreen(
             Dialog(onDismissRequest = { playingItem = null }) {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                     VideoPlayerView(videoUrl = item.uri.toString(), modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
+
+        // Fullscreen In-App Photo Preview Dialog
+        previewPhotoItem?.let { item ->
+            Dialog(onDismissRequest = { previewPhotoItem = null }) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "@${item.creatorName}",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                            IconButton(onClick = { previewPhotoItem = null }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Close", tint = TextSecondary)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        AsyncImage(
+                            model = item.uri,
+                            contentDescription = "Photo Preview",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Button(
+                            onClick = {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "image/*"
+                                    putExtra(Intent.EXTRA_STREAM, item.uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IgPink)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Share Image", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }

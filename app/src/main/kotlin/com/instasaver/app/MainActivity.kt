@@ -55,7 +55,7 @@ import com.instasaver.app.ui.watchlist.WatchlistScreen
 
 class MainActivity : ComponentActivity() {
 
-    private var sharedInstagramUrl: String? = null
+    private val sharedInstagramUrl = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,7 +71,8 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppRootContainer(initialSharedUrl = sharedInstagramUrl)
+                    val sharedUrl by sharedInstagramUrl.collectAsState()
+                    AppRootContainer(initialSharedUrl = sharedUrl)
                 }
             }
         }
@@ -86,7 +87,7 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
             if (text.contains("instagram.com/")) {
-                sharedInstagramUrl = text
+                sharedInstagramUrl.value = text
             }
         }
     }
@@ -96,6 +97,12 @@ class MainActivity : ComponentActivity() {
 fun AppRootContainer(initialSharedUrl: String?) {
     var selectedTab by remember { mutableIntStateOf(if (initialSharedUrl != null) 0 else 0) }
     var explorerTargetUsername by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(initialSharedUrl) {
+        if (!initialSharedUrl.isNullOrBlank()) {
+            selectedTab = 0
+        }
+    }
 
     val isLoggedIn by com.instasaver.app.core.network.InstagramSessionManager.isLoggedIn.collectAsState()
     var showLoginDialog by remember { mutableStateOf(false) }
@@ -210,7 +217,13 @@ fun AppRootContainer(initialSharedUrl: String?) {
                 .padding(innerPadding)
         ) {
             when (selectedTab) {
-                0 -> HomeScreen(sharedUrl = initialSharedUrl)
+                0 -> HomeScreen(
+                    sharedUrl = initialSharedUrl,
+                    onExploreProfile = { username ->
+                        explorerTargetUsername = username
+                        selectedTab = 1 // Switch to Profile Explorer
+                    }
+                )
                 1 -> ProfileExplorerScreen(initialUsername = explorerTargetUsername)
                 2 -> WatchlistScreen(onCreatorClick = { username ->
                     explorerTargetUsername = username

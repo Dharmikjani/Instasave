@@ -121,11 +121,7 @@ fun ProfileExplorerScreen(
             isLoading = false
             result.onSuccess { data ->
                 profileData = data
-                if (data.posts.isNotEmpty() && data.reels.isEmpty()) {
-                    selectedTab = 1
-                } else {
-                    selectedTab = 0
-                }
+                selectedTab = if (data.posts.isEmpty() && data.reels.isNotEmpty()) 1 else 0
             }.onFailure { ex ->
                 errorMessage = ex.message ?: "Could not find profile."
             }
@@ -317,7 +313,7 @@ fun ProfileExplorerScreen(
                     }
                 }
 
-                // Tabs: Reels / Posts
+                // Tabs: Posts / Reels
                 TabRow(
                     selectedTabIndex = selectedTab,
                     containerColor = DarkSurface,
@@ -332,22 +328,22 @@ fun ProfileExplorerScreen(
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        text = { Text("Reels (${profile.reels.size})", fontWeight = FontWeight.Bold) }
+                        text = { Text("Posts (${profile.posts.size})", fontWeight = FontWeight.Bold) }
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("Posts (${profile.posts.size})", fontWeight = FontWeight.Bold) }
+                        text = { Text("Reels (${profile.reels.size})", fontWeight = FontWeight.Bold) }
                     )
                 }
 
                 // Grid Feed
-                val currentItems = if (selectedTab == 0) profile.reels else profile.posts
+                val currentItems = if (selectedTab == 0) profile.posts else profile.reels
                 if (currentItems.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = if (profile.isPrivate) "This account is private." else "No ${if (selectedTab == 0) "reels" else "posts"} loaded yet.",
+                                text = if (profile.isPrivate) "This account is private." else "No ${if (selectedTab == 0) "posts" else "reels"} loaded yet.",
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp

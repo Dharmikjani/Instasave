@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import java.util.concurrent.ConcurrentHashMap
 
@@ -75,7 +76,9 @@ object DownloadQueueManager {
                             isCompleted = true
                         )
                     )
-                    onSuccess(uri)
+                    withContext(Dispatchers.Main) {
+                        onSuccess(uri)
+                    }
                 }.onFailure { ex ->
                     val errorMsg = ex.message ?: "Download failed"
                     updateProgress(
@@ -88,7 +91,9 @@ object DownloadQueueManager {
                             error = errorMsg
                         )
                     )
-                    onError(errorMsg)
+                    withContext(Dispatchers.Main) {
+                        onError(errorMsg)
+                    }
                 }
             } finally {
                 semaphore.release()

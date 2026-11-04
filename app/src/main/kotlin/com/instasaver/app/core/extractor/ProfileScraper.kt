@@ -26,42 +26,44 @@ object ProfileScraper {
             return@withContext Result.failure(IllegalArgumentException("Please enter a valid Instagram username"))
         }
 
-        // Method 1: Web Profile Info API with full headers & session cookies
+        // Method 1: Web Profile Info API — always try first for accurate stats
         val apiResult = runCatching { fetchWebProfileInfo(cleanUsername) }
-        if (apiResult.isSuccess && apiResult.getOrNull() != null) {
-            val profile = apiResult.getOrThrow()!!
-            // If reels or posts or private profile is detected, return immediately
-            if (profile.reels.isNotEmpty() || profile.posts.isNotEmpty() || profile.isPrivate) {
-                return@withContext Result.success(profile)
-            }
+        val apiProfile = if (apiResult.isSuccess) apiResult.getOrNull() else null
+
+        // If API gave us content (reels or posts), return immediately
+        if (apiProfile != null && (apiProfile.reels.isNotEmpty() || apiProfile.posts.isNotEmpty() || apiProfile.isPrivate)) {
+            return@withContext Result.success(apiProfile)
         }
 
         // Method 2: HTML Page + Meta Description Stats + Embedded Script Parsing
         val htmlResult = runCatching { fetchProfileFromHtmlWithScraping(cleanUsername) }
-        if (htmlResult.isSuccess && htmlResult.getOrNull() != null) {
-            val htmlProfile = htmlResult.getOrThrow()!!
-            // If API gave profile pic or name, merge with HTML stats
-            if (apiResult.isSuccess && apiResult.getOrNull() != null) {
-                val apiProf = apiResult.getOrThrow()!!
-                return@withContext Result.success(
+        val htmlProfile = if (htmlResult.isSuccess) htmlResult.getOrNull() else null
+
+        return@withContext when {
+            // Both methods succeeded — merge: prefer API stats, HTML content as fallback
+            apiProfile != null && htmlProfile != null -> {
+                Result.success(
                     htmlProfile.copy(
-                        fullName = apiProf.fullName.ifEmpty { htmlProfile.fullName },
-                        hdAvatarUrl = apiProf.hdAvatarUrl.ifEmpty { htmlProfile.hdAvatarUrl },
-                        isVerified = apiProf.isVerified || htmlProfile.isVerified,
-                        reels = if (apiProf.reels.isNotEmpty()) apiProf.reels else htmlProfile.reels,
-                        posts = if (apiProf.posts.isNotEmpty()) apiProf.posts else htmlProfile.posts
+                        fullName = apiProfile.fullName.ifEmpty { htmlProfile.fullName },
+                        hdAvatarUrl = apiProfile.hdAvatarUrl.ifEmpty { htmlProfile.hdAvatarUrl },
+                        isVerified = apiProfile.isVerified || htmlProfile.isVerified,
+                        isPrivate = apiProfile.isPrivate,
+                        // CRITICAL: Always use API stats if available (they are accurate integers)
+                        followersCount = if (apiProfile.followersCount.isNotEmpty() && apiProfile.followersCount != "0") apiProfile.followersCount else htmlProfile.followersCount,
+                        followingCount = if (apiProfile.followingCount.isNotEmpty() && apiProfile.followingCount != "0") apiProfile.followingCount else htmlProfile.followingCount,
+                        postsCount = if (apiProfile.postsCount > 0) apiProfile.postsCount else htmlProfile.postsCount,
+                        reels = if (apiProfile.reels.isNotEmpty()) apiProfile.reels else htmlProfile.reels,
+                        posts = if (apiProfile.posts.isNotEmpty()) apiProfile.posts else htmlProfile.posts
                     )
                 )
             }
-            return@withContext Result.success(htmlProfile)
+            // Only API succeeded
+            apiProfile != null -> Result.success(apiProfile)
+            // Only HTML succeeded
+            htmlProfile != null -> Result.success(htmlProfile)
+            // Both failed
+            else -> Result.failure(Exception("Unable to load profile for @$cleanUsername. The account may be private or Instagram is currently limiting access."))
         }
-
-        // Method 3: Fallback if API returned metadata
-        if (apiResult.isSuccess && apiResult.getOrNull() != null) {
-            return@withContext Result.success(apiResult.getOrThrow()!!)
-        }
-
-        Result.failure(Exception("Unable to load profile for @$cleanUsername."))
     }
 
     private fun fetchWebProfileInfo(username: String): ProfileData? {
@@ -95,12 +97,14 @@ object ProfileScraper {
         }
 
         val response = InstagramHttpClient.client.newCall(requestBuilder.build()).execute()
-        if (!response.isSuccessful) return null
-        val body = response.body?.string() ?: return null
+        if (!response.isSuccessful) {
+            return fetchMobileApiProfile(username)
+        }
+        val body = response.body?.string() ?: return fetchMobileApiProfile(username)
 
-        val json = JSONObject(body)
-        val data = json.optJSONObject("data") ?: return null
-        val user = data.optJSONObject("user") ?: return null
+        val json = if (body.startsWith("{")) JSONObject(body) else return fetchMobileApiProfile(username)
+        val data = json.optJSONObject("data") ?: return fetchMobileApiProfile(username)
+        val user = data.optJSONObject("user") ?: return fetchMobileApiProfile(username)
 
         val fullName = user.optString("full_name", username)
         val bio = user.optString("biography", "")
@@ -164,6 +168,45 @@ object ProfileScraper {
             reels = reelsMap.values.toList(),
             posts = postsMap.values.toList()
         )
+    }
+
+    private fun fetchMobileApiProfile(username: String): ProfileData? {
+        val url = "https://www.instagram.com/$username/?__a=1&__d=dis"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; Google; Pixel 7; panther; tensor; en_US; 458229204)")
+            .header("Accept", "application/json")
+            .header("X-IG-App-ID", IG_APP_ID)
+            .build()
+        return try {
+            val response = InstagramHttpClient.client.newCall(request).execute()
+            if (!response.isSuccessful) return null
+            val body = response.body?.string() ?: return null
+            if (!body.startsWith("{")) return null
+            val json = JSONObject(body)
+            val user = json.optJSONObject("graphql")?.optJSONObject("user")
+                ?: json.optJSONObject("data")?.optJSONObject("user")
+                ?: return null
+            val followers = user.optJSONObject("edge_followed_by")?.optInt("count", 0) ?: 0
+            val following = user.optJSONObject("edge_follow")?.optInt("count", 0) ?: 0
+            val posts = user.optJSONObject("edge_owner_to_timeline_media")?.optInt("count", 0) ?: 0
+            ProfileData(
+                username = username,
+                fullName = user.optString("full_name", username),
+                bio = user.optString("biography", ""),
+                hdAvatarUrl = user.optString("profile_pic_url_hd", user.optString("profile_pic_url", "")),
+                isPrivate = user.optBoolean("is_private", false),
+                isVerified = user.optBoolean("is_verified", false),
+                postsCount = posts,
+                followersCount = formatCount(followers),
+                followingCount = formatCount(following),
+                externalUrl = user.optString("external_url", ""),
+                reels = emptyList(),
+                posts = emptyList()
+            )
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun parseNodeToMedia(node: JSONObject, username: String, hdAvatar: String, forceVideo: Boolean): MediaItem {

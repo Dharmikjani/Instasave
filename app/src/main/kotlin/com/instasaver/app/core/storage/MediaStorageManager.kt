@@ -228,7 +228,7 @@ object MediaStorageManager {
         while (input.read(buffer).also { read = it } != -1) {
             output.write(buffer, 0, read)
             bytesCopied += read
-            val progress = if (totalBytes > 0) bytesCopied.toFloat() / totalBytes else 0f
+            val progress = if (totalBytes > 0) bytesCopied.toFloat() / totalBytes else -1f
             onProgress(progress, bytesCopied, totalBytes)
         }
         output.flush()

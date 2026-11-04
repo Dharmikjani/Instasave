@@ -196,6 +196,7 @@ fun HomeScreen(
                                         Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                                     }
                                 },
+                                enabled = !isLoading,
                                 colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
@@ -275,6 +276,7 @@ fun HomeScreen(
             detectedClipboardUrl?.let { link ->
                 SmartClipboardPill(
                     link = link,
+                    enabled = !isLoading,
                     onDownload = {
                         inputUrl = link
                         detectedClipboardUrl = null
@@ -298,13 +300,21 @@ private fun fetchUrl(
     onError(null)
     onResult(null)
 
-    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-        val result = InstagramExtractor.extractMedia(url)
-        onLoading(false)
-        result.onSuccess { media ->
-            onResult(media)
-        }.onFailure { ex ->
-            onError(ex.message ?: "Failed to extract Instagram link.")
+    // Use IO for network work, switch to Main for UI state updates
+    kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    ).launch {
+        val result = runCatching { InstagramExtractor.extractMedia(url) }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            onLoading(false)
+            val innerResult = result.getOrElse { ex ->
+                Result.failure(ex)
+            }
+            innerResult.onSuccess { media ->
+                onResult(media)
+            }.onFailure { ex ->
+                onError(ex.message ?: "Failed to extract Instagram link.")
+            }
         }
     }
 }
@@ -438,15 +448,27 @@ fun MediaPreviewCard(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Downloading...", color = TextSecondary, fontSize = 12.sp)
-                            Text("${(downloadProgress.progress * 100).toInt()}%", color = IgPink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            if (downloadProgress.progress >= 0f) {
+                                Text("${(downloadProgress.progress * 100).toInt()}%", color = IgPink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            } else {
+                                Text("Saving...", color = IgPink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
-                        LinearProgressIndicator(
-                            progress = { downloadProgress.progress },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = IgPink,
-                            trackColor = DarkSurfaceElevated
-                        )
+                        if (downloadProgress.progress >= 0f) {
+                            LinearProgressIndicator(
+                                progress = { downloadProgress.progress },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = IgPink,
+                                trackColor = DarkSurfaceElevated
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = IgPink,
+                                trackColor = DarkSurfaceElevated
+                            )
+                        }
                     }
                 }
             }
@@ -492,7 +514,9 @@ fun MediaPreviewCard(
                     Text(
                         when (media.type) {
                             MediaType.REEL -> "Download 1080p Video"
+                            MediaType.POST_VIDEO -> "Download Video"
                             MediaType.CAROUSEL -> "Download All Slides (${media.carouselItems.size})"
+                            MediaType.AUDIO -> "Download Audio (M4A)"
                             else -> "Download Photo"
                         },
                         color = Color.White,
@@ -549,6 +573,7 @@ fun MediaPreviewCard(
 @Composable
 fun SmartClipboardPill(
     link: String,
+    enabled: Boolean = true,
     onDownload: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -567,6 +592,7 @@ fun SmartClipboardPill(
             Spacer(modifier = Modifier.width(12.dp))
             Button(
                 onClick = onDownload,
+                enabled = enabled,
                 shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = IgPink),
                 modifier = Modifier.height(34.dp)

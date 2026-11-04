@@ -31,8 +31,9 @@ object InstagramHttpClient {
             val list = mutableListOf<Cookie>()
 
             // 1. In-memory cookies (matching instagram.com or www.instagram.com)
+            val host = url.host
             for ((domain, cookies) in cookieStore) {
-                if (url.host == domain || url.host.endsWith(".$domain") || domain.endsWith(url.host)) {
+                if (host == domain || host.endsWith(".$domain")) {
                     list.addAll(cookies)
                 }
             }

@@ -26,7 +26,10 @@ object ProfileScraper {
             return@withContext Result.failure(IllegalArgumentException("Please enter a valid Instagram username"))
         }
 
-        // Method 1: Web Profile Info API — always try first for accurate stats
+        // 1. Initialize anonymous guest cookies if needed
+        InstagramHttpClient.ensureGuestCookies()
+
+        // 2. Tier 1: Instagram Official Web Profile Info API (with Desktop Chrome headers)
         val apiResult = runCatching { fetchWebProfileInfo(cleanUsername) }
         val apiProfile = if (apiResult.isSuccess) apiResult.getOrNull() else null
 
@@ -35,7 +38,29 @@ object ProfileScraper {
             return@withContext Result.success(apiProfile)
         }
 
-        // Method 2: HTML Page + Meta Description Stats + Embedded Script Parsing
+        // 3. Tier 2: Public Mirror (Picuki / Imginn) — fetches real bio & posts without login
+        val mirrorResult = runCatching { fetchProfileFromMirror(cleanUsername) }
+        val mirrorProfile = if (mirrorResult.isSuccess) mirrorResult.getOrNull() else null
+
+        if (mirrorProfile != null && (mirrorProfile.posts.isNotEmpty() || mirrorProfile.reels.isNotEmpty())) {
+            // Merge with API profile if API had stats/verified status
+            if (apiProfile != null) {
+                return@withContext Result.success(
+                    mirrorProfile.copy(
+                        fullName = apiProfile.fullName.ifEmpty { mirrorProfile.fullName },
+                        hdAvatarUrl = apiProfile.hdAvatarUrl.ifEmpty { mirrorProfile.hdAvatarUrl },
+                        isVerified = apiProfile.isVerified || mirrorProfile.isVerified,
+                        followersCount = if (apiProfile.followersCount.isNotEmpty() && apiProfile.followersCount != "0") apiProfile.followersCount else mirrorProfile.followersCount,
+                        followingCount = if (apiProfile.followingCount.isNotEmpty() && apiProfile.followingCount != "0") apiProfile.followingCount else mirrorProfile.followingCount,
+                        postsCount = if (apiProfile.postsCount > 0) apiProfile.postsCount else mirrorProfile.postsCount,
+                        bio = mirrorProfile.bio.ifEmpty { apiProfile.bio }
+                    )
+                )
+            }
+            return@withContext Result.success(mirrorProfile)
+        }
+
+        // 4. Tier 3: HTML Page + Meta Description Stats + Embedded Script Parsing
         val htmlResult = runCatching { fetchProfileFromHtmlWithScraping(cleanUsername) }
         val htmlProfile = if (htmlResult.isSuccess) htmlResult.getOrNull() else null
 
@@ -59,9 +84,11 @@ object ProfileScraper {
             }
             // Only API succeeded
             apiProfile != null -> Result.success(apiProfile)
+            // Only Mirror succeeded
+            mirrorProfile != null -> Result.success(mirrorProfile)
             // Only HTML succeeded
             htmlProfile != null -> Result.success(htmlProfile)
-            // Both failed
+            // All failed
             else -> Result.failure(Exception("Unable to load profile for @$cleanUsername. The account may be private or Instagram is currently limiting access."))
         }
     }
@@ -70,11 +97,20 @@ object ProfileScraper {
         val url = "https://www.instagram.com/api/v1/users/web_profile_info/?username=$username"
         val requestBuilder = Request.Builder()
             .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
             .header("X-IG-App-ID", IG_APP_ID)
             .header("X-ASBD-ID", ASBD_ID)
             .header("X-IG-WWW-Claim", "0")
             .header("X-Requested-With", "XMLHttpRequest")
             .header("Referer", "https://www.instagram.com/$username/")
+            .header("Sec-Ch-Ua", "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"")
+            .header("Sec-Ch-Ua-Mobile", "?0")
+            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+            .header("Sec-Fetch-Dest", "empty")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Accept", "*/*")
+            .header("Accept-Language", "en-US,en;q=0.9")
 
         // Attach WebView cookies directly
         try {
@@ -119,40 +155,7 @@ object ProfileScraper {
         val followingCountInt = user.optJSONObject("edge_follow")?.optInt("count", 0) ?: 0
         val postsCountInt = user.optJSONObject("edge_owner_to_timeline_media")?.optInt("count", 0) ?: 0
 
-        val reelsMap = LinkedHashMap<String, MediaItem>()
-        val postsMap = LinkedHashMap<String, MediaItem>()
-
-        // 1. Parse REELS (edge_clips_tab or legacy edge_felix_video_timeline)
-        val clipsTabEdges = user.optJSONObject("edge_clips_tab")?.optJSONArray("edges")
-            ?: user.optJSONObject("edge_felix_video_timeline")?.optJSONArray("edges")
-        if (clipsTabEdges != null) {
-            for (i in 0 until clipsTabEdges.length()) {
-                val node = clipsTabEdges.getJSONObject(i).optJSONObject("node") ?: continue
-                val item = parseNodeToMedia(node, username, hdAvatar, forceVideo = true)
-                if (item.shortcode.isNotEmpty()) {
-                    reelsMap[item.shortcode] = item
-                }
-            }
-        }
-
-        // 2. Parse Timeline Media (edge_owner_to_timeline_media)
-        val timelineEdges = user.optJSONObject("edge_owner_to_timeline_media")?.optJSONArray("edges")
-        if (timelineEdges != null) {
-            for (i in 0 until timelineEdges.length()) {
-                val node = timelineEdges.getJSONObject(i).optJSONObject("node") ?: continue
-                val isVideo = node.optBoolean("is_video", false) || node.optJSONObject("media")?.optBoolean("is_video", false) == true
-                val item = parseNodeToMedia(node, username, hdAvatar, forceVideo = isVideo)
-                if (item.shortcode.isEmpty()) continue
-
-                if (isVideo) {
-                    if (!reelsMap.containsKey(item.shortcode)) {
-                        reelsMap[item.shortcode] = item
-                    }
-                } else {
-                    postsMap[item.shortcode] = item
-                }
-            }
-        }
+        val (reelsList, postsList) = parseUserMedia(user, username, hdAvatar)
 
         return ProfileData(
             username = username,
@@ -161,12 +164,12 @@ object ProfileScraper {
             hdAvatarUrl = cleanUrl(hdAvatar),
             isPrivate = isPrivate,
             isVerified = isVerified,
-            postsCount = if (postsCountInt > 0) postsCountInt else (reelsMap.size + postsMap.size),
+            postsCount = if (postsCountInt > 0) postsCountInt else (reelsList.size + postsList.size),
             followersCount = formatCount(followerCountInt),
             followingCount = formatCount(followingCountInt),
             externalUrl = externalUrl,
-            reels = reelsMap.values.toList(),
-            posts = postsMap.values.toList()
+            reels = reelsList,
+            posts = postsList
         )
     }
 
@@ -190,6 +193,10 @@ object ProfileScraper {
             val followers = user.optJSONObject("edge_followed_by")?.optInt("count", 0) ?: 0
             val following = user.optJSONObject("edge_follow")?.optInt("count", 0) ?: 0
             val posts = user.optJSONObject("edge_owner_to_timeline_media")?.optInt("count", 0) ?: 0
+            val hdAvatar = user.optString("profile_pic_url_hd", user.optString("profile_pic_url", ""))
+
+            val (reelsList, postsList) = parseUserMedia(user, username, hdAvatar)
+
             ProfileData(
                 username = username,
                 fullName = user.optString("full_name", username),
@@ -197,12 +204,12 @@ object ProfileScraper {
                 hdAvatarUrl = user.optString("profile_pic_url_hd", user.optString("profile_pic_url", "")),
                 isPrivate = user.optBoolean("is_private", false),
                 isVerified = user.optBoolean("is_verified", false),
-                postsCount = posts,
+                postsCount = if (posts > 0) posts else (reelsList.size + postsList.size),
                 followersCount = formatCount(followers),
                 followingCount = formatCount(following),
                 externalUrl = user.optString("external_url", ""),
-                reels = emptyList(),
-                posts = emptyList()
+                reels = reelsList,
+                posts = postsList
             )
         } catch (e: Exception) {
             null
@@ -244,6 +251,211 @@ object ProfileScraper {
             caption = caption,
             authorUsername = username,
             authorAvatarUrl = hdAvatar
+        )
+    }
+
+    private fun parseUserMedia(
+        user: JSONObject,
+        username: String,
+        hdAvatar: String
+    ): Pair<List<MediaItem>, List<MediaItem>> {
+        val reelsMap = LinkedHashMap<String, MediaItem>()
+        val postsMap = LinkedHashMap<String, MediaItem>()
+
+        // 1. Clips / Reels
+        val clipsEdges = user.optJSONObject("edge_clips_tab")?.optJSONArray("edges")
+            ?: user.optJSONObject("edge_felix_video_timeline")?.optJSONArray("edges")
+        if (clipsEdges != null) {
+            for (i in 0 until clipsEdges.length()) {
+                val node = clipsEdges.getJSONObject(i).optJSONObject("node") ?: continue
+                val item = parseNodeToMedia(node, username, hdAvatar, forceVideo = true)
+                if (item.shortcode.isNotEmpty()) {
+                    reelsMap[item.shortcode] = item
+                }
+            }
+        }
+
+        // 2. Timeline Media (12 posts default page on Instagram Web)
+        val timelineEdges = user.optJSONObject("edge_owner_to_timeline_media")?.optJSONArray("edges")
+        if (timelineEdges != null) {
+            for (i in 0 until timelineEdges.length()) {
+                val node = timelineEdges.getJSONObject(i).optJSONObject("node") ?: continue
+                val isVideo = node.optBoolean("is_video", false) || node.optJSONObject("media")?.optBoolean("is_video", false) == true
+                val item = parseNodeToMedia(node, username, hdAvatar, forceVideo = isVideo)
+                if (item.shortcode.isEmpty()) continue
+
+                if (isVideo) {
+                    if (!reelsMap.containsKey(item.shortcode)) {
+                        reelsMap[item.shortcode] = item
+                    }
+                } else {
+                    postsMap[item.shortcode] = item
+                }
+            }
+        }
+
+        return Pair(reelsMap.values.toList(), postsMap.values.toList())
+    }
+
+    /**
+     * Tier 2 Public Mirror layer (Picuki / Imginn) that reliably returns 12 posts & real bio
+     * without requiring an active user login.
+     */
+    private fun fetchProfileFromMirror(username: String): ProfileData? {
+        val picuki = runCatching { fetchFromPicuki(username) }.getOrNull()
+        if (picuki != null && (picuki.posts.isNotEmpty() || picuki.reels.isNotEmpty() || picuki.bio.isNotEmpty())) {
+            return picuki
+        }
+
+        val imginn = runCatching { fetchFromImginn(username) }.getOrNull()
+        if (imginn != null && (imginn.posts.isNotEmpty() || imginn.reels.isNotEmpty() || imginn.bio.isNotEmpty())) {
+            return imginn
+        }
+
+        return null
+    }
+
+    private fun fetchFromPicuki(username: String): ProfileData? {
+        val url = "https://www.picuki.com/profile/$username"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .build()
+        val response = InstagramHttpClient.client.newCall(request).execute()
+        if (!response.isSuccessful) return null
+        val html = response.body?.string() ?: return null
+        val doc = Jsoup.parse(html)
+
+        val avatar = doc.selectFirst(".profile-avatar img")?.attr("src")
+            ?: doc.selectFirst(".profile-avatar")?.attr("src") ?: ""
+        val fullName = doc.selectFirst(".profile-name-bottom")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".profile-description")?.text()?.trim() ?: ""
+        val isVerified = doc.selectFirst(".verified-icon") != null || doc.selectFirst("i.fa-check-circle") != null
+
+        val stats = doc.select(".profile-statistics span")
+        var followers = ""
+        var following = ""
+        var postsCount = 0
+        for (span in stats) {
+            val text = span.text()
+            if (text.contains("Followers", ignoreCase = true)) {
+                followers = text.replace(Regex("[^0-9.KMBkmb]"), "")
+            } else if (text.contains("Following", ignoreCase = true)) {
+                following = text.replace(Regex("[^0-9.KMBkmb]"), "")
+            } else if (text.contains("Posts", ignoreCase = true)) {
+                postsCount = text.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 0
+            }
+        }
+
+        val posts = mutableListOf<MediaItem>()
+        val reels = mutableListOf<MediaItem>()
+
+        val boxes = doc.select(".box-photos .box-photo, .content-items .content-item, .box-photo")
+        val shortcodePattern = Pattern.compile("(?:media|p)/([A-Za-z0-9_-]+)")
+        for (box in boxes) {
+            val link = box.selectFirst("a[href]")?.attr("href") ?: ""
+            val matcher = shortcodePattern.matcher(link)
+            val code = if (matcher.find()) matcher.group(1) else ""
+            if (code.isNullOrEmpty()) continue
+
+            val img = box.selectFirst("img[src]")?.attr("src")
+                ?: box.selectFirst("img[data-src]")?.attr("data-src") ?: ""
+            val isVideo = box.selectFirst(".video-icon") != null || box.selectFirst("video") != null
+            val caption = box.selectFirst(".content-title")?.text()?.trim() ?: ""
+
+            val item = MediaItem(
+                id = code,
+                shortcode = code,
+                type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
+                url = "https://www.instagram.com/p/$code/",
+                downloadUrl = cleanUrl(img),
+                thumbnailUrl = cleanUrl(img),
+                title = (if (isVideo) "Reel" else "Post") + " by @$username",
+                caption = caption,
+                authorUsername = username,
+                authorAvatarUrl = avatar
+            )
+            if (isVideo) reels.add(item) else posts.add(item)
+        }
+
+        return ProfileData(
+            username = username,
+            fullName = fullName.ifEmpty { username },
+            bio = bio,
+            hdAvatarUrl = cleanUrl(avatar),
+            isPrivate = false,
+            isVerified = isVerified,
+            postsCount = if (postsCount > 0) postsCount else (reels.size + posts.size),
+            followersCount = followers,
+            followingCount = following,
+            externalUrl = "",
+            reels = reels,
+            posts = posts
+        )
+    }
+
+    private fun fetchFromImginn(username: String): ProfileData? {
+        val url = "https://imginn.com/$username/"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .build()
+        val response = InstagramHttpClient.client.newCall(request).execute()
+        if (!response.isSuccessful) return null
+        val html = response.body?.string() ?: return null
+        val doc = Jsoup.parse(html)
+
+        val avatar = doc.selectFirst(".avatar img")?.attr("src") ?: ""
+        val fullName = doc.selectFirst(".username")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".desc")?.text()?.trim() ?: ""
+
+        val posts = mutableListOf<MediaItem>()
+        val reels = mutableListOf<MediaItem>()
+
+        val items = doc.select(".items .item")
+        val shortcodePattern = Pattern.compile("/p/([A-Za-z0-9_-]+)/")
+        for (itemElem in items) {
+            val link = itemElem.selectFirst("a[href]")?.attr("href") ?: ""
+            val matcher = shortcodePattern.matcher(link)
+            val code = if (matcher.find()) matcher.group(1) else ""
+            if (code.isNullOrEmpty()) continue
+
+            val img = itemElem.selectFirst("img[src]")?.attr("src")
+                ?: itemElem.selectFirst("img[data-src]")?.attr("data-src") ?: ""
+            val isVideo = itemElem.selectFirst(".icon-video") != null
+
+            val mediaItem = MediaItem(
+                id = code,
+                shortcode = code,
+                type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
+                url = "https://www.instagram.com/p/$code/",
+                downloadUrl = cleanUrl(img),
+                thumbnailUrl = cleanUrl(img),
+                title = (if (isVideo) "Reel" else "Post") + " by @$username",
+                caption = "",
+                authorUsername = username,
+                authorAvatarUrl = avatar
+            )
+            if (isVideo) reels.add(mediaItem) else posts.add(mediaItem)
+        }
+
+        if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty()) return null
+
+        return ProfileData(
+            username = username,
+            fullName = fullName.ifEmpty { username },
+            bio = bio,
+            hdAvatarUrl = cleanUrl(avatar),
+            isPrivate = false,
+            isVerified = false,
+            postsCount = reels.size + posts.size,
+            followersCount = "",
+            followingCount = "",
+            externalUrl = "",
+            reels = reels,
+            posts = posts
         )
     }
 

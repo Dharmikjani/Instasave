@@ -17,6 +17,9 @@ object InstagramHttpClient {
     const val USER_AGENT_ANDROID =
         "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UD1A.230803.041) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36"
 
+    const val USER_AGENT_DESKTOP =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
     private val cookieStore = ConcurrentHashMap<String, MutableList<Cookie>>()
 
     private val cookieJar = object : CookieJar {
@@ -74,8 +77,10 @@ object InstagramHttpClient {
     private val headersInterceptor = Interceptor { chain ->
         val original = chain.request()
         val host = original.url.host
+        val originalUa = original.header("User-Agent")
+        val effectiveUa = if (!originalUa.isNullOrBlank()) originalUa else USER_AGENT_ANDROID
         val requestBuilder = original.newBuilder()
-            .header("User-Agent", USER_AGENT_ANDROID)
+            .header("User-Agent", effectiveUa)
             .header("Accept", "*/*")
             .header("Accept-Language", "en-US,en;q=0.9")
 
@@ -158,6 +163,28 @@ object InstagramHttpClient {
             cm.flush()
         } catch (e: Exception) {
             // ignore
+        }
+    }
+
+    /**
+     * Initializes anonymous guest session cookies so that public Instagram Web endpoints
+     * (like web_profile_info and embed) accept unauthenticated requests without throwing 401.
+     */
+    fun ensureGuestCookies() {
+        try {
+            val cm = CookieManager.getInstance()
+            val existing = cm.getCookie("https://www.instagram.com")
+            if (existing.isNullOrBlank() || !existing.contains("csrftoken=")) {
+                val guestCsrf = java.util.UUID.randomUUID().toString().replace("-", "")
+                val guestMid = "Z" + java.util.UUID.randomUUID().toString().replace("-", "").take(25)
+                val guestDid = java.util.UUID.randomUUID().toString()
+                cm.setCookie("https://www.instagram.com", "csrftoken=$guestCsrf; Domain=.instagram.com; Path=/; Secure")
+                cm.setCookie("https://www.instagram.com", "mid=$guestMid; Domain=.instagram.com; Path=/; Secure")
+                cm.setCookie("https://www.instagram.com", "ig_did=$guestDid; Domain=.instagram.com; Path=/; Secure")
+                cm.flush()
+            }
+        } catch (e: Exception) {
+            // ignore in tests
         }
     }
 }

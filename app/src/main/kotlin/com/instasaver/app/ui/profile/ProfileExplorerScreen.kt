@@ -121,6 +121,11 @@ fun ProfileExplorerScreen(
             isLoading = false
             result.onSuccess { data ->
                 profileData = data
+                if (data.posts.isNotEmpty() && data.reels.isEmpty()) {
+                    selectedTab = 1
+                } else {
+                    selectedTab = 0
+                }
             }.onFailure { ex ->
                 errorMessage = ex.message ?: "Could not find profile."
             }

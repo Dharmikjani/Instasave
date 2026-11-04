@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "carousel_123",
+      "user": {
+        "username": "natgeo",
+        "full_name": "National Geographic",
+        "profile_pic_url": "https://scontent.cdninstagram.com/natgeo_dp.jpg"
+      },
+      "caption": {
+        "text": "Wildlife moments captured around the globe #nature #wildlife"
+      },
+      "carousel_media": [
+        {
+          "media_type": 1,
+          "image_versions2": {
+            "candidates": [{ "url": "https://scontent.cdninstagram.com/slide1_photo.jpg" }]
+          }
+        },
+        {
+          "media_type": 2,
+          "video_versions": [{ "url": "https://scontent.cdninstagram.com/slide2_video.mp4" }],
+          "image_versions2": {
+            "candidates": [{ "url": "https://scontent.cdninstagram.com/slide2_thumb.jpg" }]
+          }
+        },
+        {
+          "media_type": 1,
+          "image_versions2": {
+            "candidates": [{ "url": "https://scontent.cdninstagram.com/slide3_photo.jpg" }]
+          }
+        }
+      ]
+    }
+  ]
+}
+

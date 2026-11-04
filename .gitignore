@@ -1,0 +1,28 @@
+# Built application files & caches
+*.iml
+.gradle
+.kotlin
+/local.properties
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iws
+out/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Build outputs
+build/
+*/build/
+captures/
+.externalNativeBuild
+.cxx
+*.hprof
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class

@@ -1,0 +1,49 @@
+{
+  "data": {
+    "user": {
+      "biography": "Creator & Philanthropist. Making the world a better place.",
+      "external_url": "https://youtube.com/mrbeast",
+      "edge_followed_by": { "count": 62500000 },
+      "edge_follow": { "count": 215 },
+      "full_name": "MrBeast",
+      "id": "1234567890",
+      "is_private": false,
+      "is_verified": true,
+      "profile_pic_url": "https://scontent.cdninstagram.com/avatar_normal.jpg",
+      "profile_pic_url_hd": "https://scontent.cdninstagram.com/avatar_hd.jpg",
+      "username": "mrbeast",
+      "edge_felix_video_timeline": {
+        "edges": [
+          {
+            "node": {
+              "id": "felix_reel_101",
+              "shortcode": "C7xY9Z1A2B3",
+              "is_video": true,
+              "display_url": "https://scontent.cdninstagram.com/reel_thumb1.jpg",
+              "video_url": "https://scontent.cdninstagram.com/reel_video1.mp4",
+              "edge_media_to_caption": {
+                "edges": [{ "node": { "text": "Giving $500,000 to random stranger!" } }]
+              }
+            }
+          }
+        ]
+      },
+      "edge_owner_to_timeline_media": {
+        "count": 450,
+        "edges": [
+          {
+            "node": {
+              "id": "3100000002",
+              "shortcode": "C8aB1C2D3E4",
+              "is_video": false,
+              "display_url": "https://scontent.cdninstagram.com/photo_post1.jpg",
+              "edge_media_to_caption": {
+                "edges": [{ "node": { "text": "New studio tour coming soon!" } }]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

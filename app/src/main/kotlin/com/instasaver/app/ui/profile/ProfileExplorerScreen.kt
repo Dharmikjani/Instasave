@@ -196,7 +196,35 @@ fun ProfileExplorerScreen(
             // Error state
             if (errorMessage != null) {
                 Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text(text = errorMessage ?: "", color = Color(0xFFFF6B6B), fontSize = 14.sp)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = errorMessage ?: "",
+                                color = Color(0xFFFF6B6B),
+                                fontSize = 14.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    errorMessage = null
+                                    profileData = ProfileScraper.getDemoProfile("virat.kohli")
+                                    selectedTab = 0
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IgPink)
+                            ) {
+                                Text("Preview @virat.kohli Profile", fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
                 }
             }
 

@@ -260,6 +260,37 @@ fun HomeScreen(
                                 Text("Fetch & Download", color = Color.White, fontWeight = FontWeight.Bold)
                             }
                         }
+
+                        // Quick Test Chips
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Quick Test:", color = TextMuted, fontSize = 11.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = DarkSurfaceBorder,
+                                    modifier = Modifier.clickable {
+                                        inputUrl = "https://www.instagram.com/reel/C_demo_sample/"
+                                        fetchUrl(inputUrl, context, onLoading = { isLoading = it }, onError = { errorMessage = it }, onResult = { currentMedia = it })
+                                    }
+                                ) {
+                                    Text("🎬 Sample Reel", color = TextSecondary, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = DarkSurfaceBorder,
+                                    modifier = Modifier.clickable {
+                                        onExploreProfile("virat.kohli")
+                                    }
+                                ) {
+                                    Text("👤 @virat.kohli", color = IgPink, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                }
+                            }
+                        }
                     }
                 }
             }

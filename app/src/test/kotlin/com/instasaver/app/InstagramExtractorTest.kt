@@ -1,6 +1,6 @@
 package com.instasaver.app
 
-import com.instasaver.app.core.extractor.InstagramExtractor
+import com.instasaver.core.extractor.InstagramExtractor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull

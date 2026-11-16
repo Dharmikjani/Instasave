@@ -1,0 +1,479 @@
+package com.instasaver.feature.profile.ui
+
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
+import com.instasaver.core.model.MediaItem
+import com.instasaver.core.model.MediaType
+import com.instasaver.core.model.ProfileData
+import com.instasaver.feature.profile.ui.theme.AmoledBlack
+import com.instasaver.feature.profile.ui.theme.DarkSurface
+import com.instasaver.feature.profile.ui.theme.DarkSurfaceBorder
+import com.instasaver.feature.profile.ui.theme.DarkSurfaceElevated
+import com.instasaver.feature.profile.ui.theme.IgPink
+import com.instasaver.feature.profile.ui.theme.InfoBlue
+import com.instasaver.feature.profile.ui.theme.StoryRingGradient
+import com.instasaver.feature.profile.ui.theme.SuccessGreen
+import com.instasaver.feature.profile.ui.theme.TextMuted
+import com.instasaver.feature.profile.ui.theme.TextPrimary
+import com.instasaver.feature.profile.ui.theme.TextSecondary
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileExplorerScreen(
+    initialUsername: String? = null,
+    modifier: Modifier = Modifier,
+    viewModel: ProfileViewModel = hiltViewModel()
+) {
+    val context = LocalContext.current
+    var searchInput by remember { mutableStateOf(initialUsername ?: "") }
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var showDpZoomDialog by remember { mutableStateOf(false) }
+    var showDownloadAllSheet by remember { mutableStateOf(false) }
+
+    val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(initialUsername) {
+        if (!initialUsername.isNullOrBlank()) {
+            searchInput = initialUsername
+            viewModel.onIntent(ProfileUiIntent.Search(initialUsername))
+        }
+    }
+
+    val isLoading = uiState is ProfileUiState.Loading
+    val profileData = (uiState as? ProfileUiState.Success)?.profile
+    val isPinned = (uiState as? ProfileUiState.Success)?.isPinned ?: false
+    val errorMessage = (uiState as? ProfileUiState.Error)?.message
+
+    Box(modifier = modifier.fillMaxSize().background(AmoledBlack)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Search Bar
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(0.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = searchInput,
+                        onValueChange = { searchInput = it },
+                        placeholder = {
+                            Text("Search @username without login...", color = TextMuted, fontSize = 14.sp)
+                        },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = IgPink,
+                            unfocusedBorderColor = DarkSurfaceBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            cursorColor = IgPink
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, tint = IgPink)
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Button(
+                        onClick = { viewModel.onIntent(ProfileUiIntent.Search(searchInput)) },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IgPink),
+                        enabled = !isLoading && searchInput.isNotBlank()
+                    ) {
+                        Text("Search", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = IgPink)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Exploring Profile in Ghost Mode...", color = TextSecondary, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            if (errorMessage != null) {
+                Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = errorMessage,
+                                color = Color(0xFFFF6B6B),
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    searchInput = "virat.kohli"
+                                    viewModel.onIntent(ProfileUiIntent.Search("virat.kohli"))
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IgPink)
+                            ) {
+                                Text("Preview @virat.kohli Profile", fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            profileData?.let { profile ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                    shape = RoundedCornerShape(0.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .border(2.5.dp, StoryRingGradient, CircleShape)
+                                    .padding(4.dp)
+                                    .clip(CircleShape)
+                                    .clickable { showDpZoomDialog = true }
+                            ) {
+                                AsyncImage(
+                                    model = profile.hdAvatarUrl,
+                                    contentDescription = "Profile Pic",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.SpaceAround
+                            ) {
+                                StatColumn(title = "Posts", value = profile.postsCount.toString())
+                                StatColumn(title = "Followers", value = profile.followersCount.ifEmpty { "--" })
+                                StatColumn(title = "Following", value = profile.followingCount.ifEmpty { "--" })
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = profile.fullName.ifEmpty { "@${profile.username}" },
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            if (profile.isVerified) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(Icons.Default.Verified, contentDescription = "Verified", tint = InfoBlue, modifier = Modifier.size(16.dp))
+                            }
+                        }
+
+                        Text(text = "@${profile.username}", color = IgPink, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+
+                        if (profile.bio.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = profile.bio,
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.onIntent(ProfileUiIntent.TogglePin(profile.username)) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isPinned) IgPink else DarkSurface
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = if (isPinned) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isPinned) "Pinned" else "+ Watchlist",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            val allMedia = profile.reels + profile.posts
+                            if (allMedia.isNotEmpty()) {
+                                Button(
+                                    onClick = { showDownloadAllSheet = true },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Download All", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                TabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = DarkSurface,
+                    contentColor = IgPink,
+                    indicator = { tabPositions ->
+                        TabRowDefaults.SecondaryIndicator(
+                            modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                            color = IgPink
+                        )
+                    }
+                ) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = { Text("Posts (${profile.posts.size})", fontWeight = FontWeight.Bold) }
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = { Text("Reels (${profile.reels.size})", fontWeight = FontWeight.Bold) }
+                    )
+                }
+
+                val mediaList = if (selectedTab == 0) profile.posts else profile.reels
+                if (mediaList.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (profile.isPrivate) "This account is private." else "No media available in this section.",
+                            color = TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxSize().padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        items(mediaList) { item ->
+                            Box(
+                                modifier = Modifier
+                                    .aspectRatio(1f)
+                                    .clickable {
+                                        viewModel.onIntent(ProfileUiIntent.DownloadItem(item))
+                                        Toast.makeText(context, "Downloading item...", Toast.LENGTH_SHORT).show()
+                                    }
+                            ) {
+                                AsyncImage(
+                                    model = item.thumbnailUrl.ifEmpty { item.downloadUrl },
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                if (item.type == MediaType.REEL || item.type == MediaType.POST_VIDEO) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showDpZoomDialog && profileData != null) {
+            HdDpDialog(
+                profile = profileData,
+                onDismiss = { showDpZoomDialog = false },
+                onDownload = {
+                    val dpItem = MediaItem(
+                        id = "${profileData.username}_dp",
+                        shortcode = "dp",
+                        type = MediaType.PROFILE_DP,
+                        url = profileData.hdAvatarUrl,
+                        downloadUrl = profileData.hdAvatarUrl,
+                        thumbnailUrl = profileData.hdAvatarUrl,
+                        authorUsername = profileData.username,
+                        title = "DP of @${profileData.username}"
+                    )
+                    viewModel.onIntent(ProfileUiIntent.DownloadItem(dpItem))
+                    Toast.makeText(context, "Saved HD Avatar to Gallery!", Toast.LENGTH_SHORT).show()
+                    showDpZoomDialog = false
+                }
+            )
+        }
+
+        if (showDownloadAllSheet && profileData != null) {
+            val allMedia = profileData.reels + profileData.posts
+            ModalBottomSheet(
+                onDismissRequest = { showDownloadAllSheet = false },
+                containerColor = DarkSurfaceElevated
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("Download ${allMedia.size} Media Items", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("All fetched posts and reels from @${profileData.username} will be saved into your gallery.", color = TextSecondary, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            viewModel.onIntent(ProfileUiIntent.DownloadBatch(allMedia))
+                            Toast.makeText(context, "Queued all items for download!", Toast.LENGTH_SHORT).show()
+                            showDownloadAllSheet = false
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Start Batch Download (${allMedia.size})", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StatColumn(title: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text = value, color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text(text = title, color = TextSecondary, fontSize = 11.sp)
+    }
+}
+
+@Composable
+fun HdDpDialog(
+    profile: ProfileData,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("HD Profile Picture", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("@${profile.username}", color = IgPink, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                AsyncImage(
+                    model = profile.hdAvatarUrl,
+                    contentDescription = "HD DP",
+                    modifier = Modifier.size(240.dp).clip(CircleShape).border(3.dp, StoryRingGradient, CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                    onClick = onDownload,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Save HD Avatar to Gallery", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}

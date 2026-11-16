@@ -29,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -41,26 +42,35 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.instasaver.app.core.watchlist.WatchlistManager
-import com.instasaver.app.ui.gallery.GalleryScreen
-import com.instasaver.app.ui.home.HomeScreen
-import com.instasaver.app.ui.profile.ProfileExplorerScreen
+import com.instasaver.app.ui.components.InstagramLoginDialog
 import com.instasaver.app.ui.theme.AmoledBlack
 import com.instasaver.app.ui.theme.DarkSurface
 import com.instasaver.app.ui.theme.IgPink
 import com.instasaver.app.ui.theme.InstaSaverTheme
+import com.instasaver.app.ui.theme.SuccessGreen
 import com.instasaver.app.ui.theme.TextMuted
 import com.instasaver.app.ui.theme.TextPrimary
-import com.instasaver.app.ui.watchlist.WatchlistScreen
+import com.instasaver.core.network.InstagramHttpClient
+import com.instasaver.core.network.InstagramSessionManager
+import com.instasaver.feature.downloader.ui.DownloaderScreen
+import com.instasaver.feature.gallery.ui.GalleryScreen
+import com.instasaver.feature.profile.ui.ProfileExplorerScreen
+import com.instasaver.feature.watchlist.ui.WatchlistScreen
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.MutableStateFlow
+import javax.inject.Inject
 
-class MainActivity : ComponentActivity() {
+@AndroidEntryPoint(ComponentActivity::class)
+class MainActivity : Hilt_MainActivity() {
 
-    private val sharedInstagramUrl = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    @Inject
+    lateinit var sessionManager: InstagramSessionManager
+
+    private val sharedInstagramUrl = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WatchlistManager.init(this)
-        com.instasaver.app.core.network.InstagramSessionManager.init(this)
+        InstagramHttpClient.ensureGuestCookies()
 
         handleIncomingIntent(intent)
         enableEdgeToEdge()
@@ -72,7 +82,10 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val sharedUrl by sharedInstagramUrl.collectAsState()
-                    AppRootContainer(initialSharedUrl = sharedUrl)
+                    AppRootContainer(
+                        initialSharedUrl = sharedUrl,
+                        sessionManager = sessionManager
+                    )
                 }
             }
         }
@@ -94,17 +107,20 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AppRootContainer(initialSharedUrl: String?) {
-    var selectedTab by remember { mutableIntStateOf(if (initialSharedUrl != null) 0 else 0) }
+fun AppRootContainer(
+    initialSharedUrl: String?,
+    sessionManager: InstagramSessionManager
+) {
+    var selectedTab by remember { mutableIntStateOf(0) }
     var explorerTargetUsername by remember { mutableStateOf<String?>(null) }
 
-    androidx.compose.runtime.LaunchedEffect(initialSharedUrl) {
+    LaunchedEffect(initialSharedUrl) {
         if (!initialSharedUrl.isNullOrBlank()) {
             selectedTab = 0
         }
     }
 
-    val isLoggedIn by com.instasaver.app.core.network.InstagramSessionManager.isLoggedIn.collectAsState()
+    val isLoggedIn by sessionManager.isLoggedIn.collectAsState()
     var showLoginDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -127,7 +143,7 @@ fun AppRootContainer(initialSharedUrl: String?) {
                 AssistChip(
                     onClick = {
                         if (isLoggedIn) {
-                            com.instasaver.app.core.network.InstagramSessionManager.logout()
+                            sessionManager.logout()
                         } else {
                             showLoginDialog = true
                         }
@@ -137,7 +153,7 @@ fun AppRootContainer(initialSharedUrl: String?) {
                             text = if (isLoggedIn) "🔐 Connected" else "🔓 Login (Unlock All)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isLoggedIn) com.instasaver.app.ui.theme.SuccessGreen else IgPink
+                            color = if (isLoggedIn) SuccessGreen else IgPink
                         )
                     },
                     colors = AssistChipDefaults.assistChipColors(
@@ -217,24 +233,24 @@ fun AppRootContainer(initialSharedUrl: String?) {
                 .padding(innerPadding)
         ) {
             when (selectedTab) {
-                0 -> HomeScreen(
+                0 -> DownloaderScreen(
                     sharedUrl = initialSharedUrl,
                     onExploreProfile = { username ->
                         explorerTargetUsername = username
-                        selectedTab = 1 // Switch to Profile Explorer
+                        selectedTab = 1
                     }
                 )
                 1 -> ProfileExplorerScreen(initialUsername = explorerTargetUsername)
                 2 -> WatchlistScreen(onCreatorClick = { username ->
                     explorerTargetUsername = username
-                    selectedTab = 1 // Switch to Profile Explorer
+                    selectedTab = 1
                 })
                 3 -> GalleryScreen()
             }
         }
 
         if (showLoginDialog) {
-            com.instasaver.app.ui.components.InstagramLoginDialog(
+            InstagramLoginDialog(
                 onDismiss = { showLoginDialog = false },
                 onLoginSuccess = { showLoginDialog = false }
             )

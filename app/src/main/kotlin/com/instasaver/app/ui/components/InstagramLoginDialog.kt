@@ -41,8 +41,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.instasaver.app.core.network.InstagramHttpClient
-import com.instasaver.app.core.network.InstagramSessionManager
+import com.instasaver.core.network.InstagramHttpClient
+import com.instasaver.core.network.InstagramSessionManager
 import com.instasaver.app.ui.theme.AmoledBlack
 import com.instasaver.app.ui.theme.DarkSurfaceElevated
 import com.instasaver.app.ui.theme.IgPink

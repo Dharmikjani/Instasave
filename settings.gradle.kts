@@ -33,3 +33,16 @@ plugins {
 rootProject.name = "InstaSaver"
 
 include(":app")
+
+// Core modules
+include(":core:model")
+include(":core:network")
+include(":core:database")
+include(":core:storage")
+include(":core:extractor")
+
+// Feature modules
+include(":feature:downloader")
+include(":feature:profile")
+include(":feature:gallery")
+include(":feature:watchlist")

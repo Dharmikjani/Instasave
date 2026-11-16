@@ -12,10 +12,12 @@ import com.instasaver.core.model.MediaItem
 import com.instasaver.core.model.MediaType
 import com.instasaver.feature.downloader.work.DownloadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface DownloaderUiState {
@@ -103,7 +105,9 @@ class DownloaderViewModel @Inject constructor(
     private fun pinCreator(username: String) {
         viewModelScope.launch {
             if (username.isNotBlank()) {
-                watchlistDao.insert(CreatorEntity(username = username))
+                withContext(Dispatchers.IO) {
+                    watchlistDao.insert(CreatorEntity(username = username))
+                }
             }
         }
     }

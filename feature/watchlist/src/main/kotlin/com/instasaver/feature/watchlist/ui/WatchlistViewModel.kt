@@ -5,10 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.instasaver.core.database.dao.WatchlistDao
 import com.instasaver.core.database.entity.CreatorEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface WatchlistUiIntent {
@@ -38,17 +40,21 @@ class WatchlistViewModel @Inject constructor(
     private fun removeCreator(username: String) {
         val clean = username.trim().removePrefix("@")
         viewModelScope.launch {
-            watchlistDao.delete(clean)
+            withContext(Dispatchers.IO) {
+                watchlistDao.delete(clean)
+            }
         }
     }
 
     private fun toggleCreator(username: String) {
         val clean = username.trim().removePrefix("@")
         viewModelScope.launch {
-            if (watchlistDao.isPinned(clean)) {
-                watchlistDao.delete(clean)
-            } else {
-                watchlistDao.insert(CreatorEntity(username = clean))
+            withContext(Dispatchers.IO) {
+                if (watchlistDao.isPinned(clean)) {
+                    watchlistDao.delete(clean)
+                } else {
+                    watchlistDao.insert(CreatorEntity(username = clean))
+                }
             }
         }
     }

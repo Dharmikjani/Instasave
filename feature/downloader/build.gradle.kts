@@ -50,11 +50,11 @@ dependencies {
 
   implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.androidx.hilt.work)
-  // ksp(libs.androidx.hilt.work.compiler)
+  ksp(libs.androidx.hilt.work.compiler)
 
   implementation(libs.hilt.android)
   implementation(libs.hilt.navigation.compose)
-  // ksp(libs.hilt.compiler)
+  ksp(libs.hilt.compiler)
 
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)

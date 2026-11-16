@@ -13,7 +13,9 @@ class InstaSaverApplication : Hilt_InstaSaverApplication(), Configuration.Provid
     lateinit var workerFactory: HiltWorkerFactory
 
     override val workManagerConfiguration: Configuration
-        get() = Configuration.Builder()
-            .setWorkerFactory(workerFactory)
-            .build()
+        get() = Configuration.Builder().apply {
+            if (::workerFactory.isInitialized) {
+                setWorkerFactory(workerFactory)
+            }
+        }.build()
 }

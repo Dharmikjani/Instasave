@@ -27,7 +27,10 @@ object DatabaseModule {
             context,
             InstaSaverDatabase::class.java,
             "instasaver.db"
-        ).fallbackToDestructiveMigration().build()
+        )
+            .fallbackToDestructiveMigration()
+            .allowMainThreadQueries()
+            .build()
     }
 
     @Provides

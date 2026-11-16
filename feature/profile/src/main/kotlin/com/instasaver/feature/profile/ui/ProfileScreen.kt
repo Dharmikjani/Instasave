@@ -185,13 +185,14 @@ fun ProfileExplorerScreen(
                             Spacer(modifier = Modifier.height(16.dp))
                             Button(
                                 onClick = {
-                                    searchInput = "virat.kohli"
-                                    viewModel.onIntent(ProfileUiIntent.Search("virat.kohli"))
+                                    if (searchInput.isNotBlank()) {
+                                        viewModel.onIntent(ProfileUiIntent.Search(searchInput))
+                                    }
                                 },
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = IgPink)
                             ) {
-                                Text("Preview @virat.kohli Profile", fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("Retry Search", fontWeight = FontWeight.Bold, color = Color.White)
                             }
                         }
                     }

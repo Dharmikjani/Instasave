@@ -90,11 +90,7 @@ object ProfileScraper {
             htmlProfile != null -> Result.success(htmlProfile)
             // All failed
             else -> {
-                if (cleanUsername.equals("virat.kohli", ignoreCase = true) || cleanUsername.equals("demo", ignoreCase = true)) {
-                    Result.success(getDemoProfile("virat.kohli"))
-                } else {
-                    Result.failure(Exception("Unable to load profile for @$cleanUsername. If you are on an office/college Wi-Fi, a firewall may be blocking Instagram."))
-                }
+                Result.failure(Exception("Unable to load profile for @$cleanUsername. Please check your internet connection or verify the username."))
             }
         }
     }
@@ -594,125 +590,6 @@ object ProfileScraper {
             count >= 1_000 -> String.format("%.1fK", count / 1_000.0)
             else -> count.toString()
         }
-    }
-
-    fun getDemoProfile(username: String = "virat.kohli"): ProfileData {
-        val samplePosts = listOf(
-            MediaItem(
-                id = "C_sample_1",
-                shortcode = "C_sample_1",
-                type = MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/C_sample_1/",
-                downloadUrl = "https://picsum.photos/id/1015/800/800",
-                thumbnailUrl = "https://picsum.photos/id/1015/400/400",
-                title = "Post by @virat.kohli",
-                caption = "Focus on the process. The results will take care of themselves. 🏏 #training",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            ),
-            MediaItem(
-                id = "C_sample_2",
-                shortcode = "C_sample_2",
-                type = MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/C_sample_2/",
-                downloadUrl = "https://picsum.photos/id/1018/800/800",
-                thumbnailUrl = "https://picsum.photos/id/1018/400/400",
-                title = "Post by @virat.kohli",
-                caption = "Morning moments. Coffee with my favourite person. ❤️ ☕",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            ),
-            MediaItem(
-                id = "C_sample_3",
-                shortcode = "C_sample_3",
-                type = MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/C_sample_3/",
-                downloadUrl = "https://picsum.photos/id/1025/800/800",
-                thumbnailUrl = "https://picsum.photos/id/1025/400/400",
-                title = "Post by @virat.kohli",
-                caption = "Grateful for the journey and the lessons along the way.",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            ),
-            MediaItem(
-                id = "C_sample_4",
-                shortcode = "C_sample_4",
-                type = MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/C_sample_4/",
-                downloadUrl = "https://picsum.photos/id/1035/800/800",
-                thumbnailUrl = "https://picsum.photos/id/1035/400/400",
-                title = "Post by @virat.kohli",
-                caption = "Game day ready. Always an honour wearing the jersey! 🇮🇳",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            ),
-            MediaItem(
-                id = "C_sample_5",
-                shortcode = "C_sample_5",
-                type = MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/C_sample_5/",
-                downloadUrl = "https://picsum.photos/id/1040/800/800",
-                thumbnailUrl = "https://picsum.photos/id/1040/400/400",
-                title = "Post by @virat.kohli",
-                caption = "Rest, recover and get back stronger. Everyday counts.",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            ),
-            MediaItem(
-                id = "C_sample_6",
-                shortcode = "C_sample_6",
-                type = MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/C_sample_6/",
-                downloadUrl = "https://picsum.photos/id/1050/800/800",
-                thumbnailUrl = "https://picsum.photos/id/1050/400/400",
-                title = "Post by @virat.kohli",
-                caption = "Memorable night on the field with the boys! 🔥",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            )
-        )
-
-        val sampleReels = listOf(
-            MediaItem(
-                id = "R_sample_1",
-                shortcode = "R_sample_1",
-                type = MediaType.REEL,
-                url = "https://www.instagram.com/reel/R_sample_1/",
-                downloadUrl = "https://www.w3schools.com/html/mov_bbb.mp4",
-                thumbnailUrl = "https://picsum.photos/id/1055/400/700",
-                title = "Reel by @virat.kohli",
-                caption = "Gym sessions. Never stop grinding! 💪 #workout",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            ),
-            MediaItem(
-                id = "R_sample_2",
-                shortcode = "R_sample_2",
-                type = MediaType.REEL,
-                url = "https://www.instagram.com/reel/R_sample_2/",
-                downloadUrl = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
-                thumbnailUrl = "https://picsum.photos/id/1060/400/700",
-                title = "Reel by @virat.kohli",
-                caption = "Behind the scenes at the shoot 🎥",
-                authorUsername = "virat.kohli",
-                authorAvatarUrl = "https://picsum.photos/id/1005/200/200"
-            )
-        )
-
-        return ProfileData(
-            username = "virat.kohli",
-            fullName = "Virat Kohli",
-            bio = "Carpediem!",
-            hdAvatarUrl = "https://picsum.photos/id/1005/400/400",
-            isPrivate = false,
-            isVerified = true,
-            postsCount = 12,
-            followersCount = "270.9M",
-            followingCount = "278",
-            externalUrl = "https://one8.com",
-            reels = sampleReels,
-            posts = samplePosts
-        )
     }
 
     private fun cleanUrl(url: String): String =

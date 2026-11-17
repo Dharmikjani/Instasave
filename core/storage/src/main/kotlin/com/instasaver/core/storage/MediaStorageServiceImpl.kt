@@ -47,100 +47,113 @@ class MediaStorageServiceImpl @Inject constructor(
         mediaType: MediaType,
         onProgress: (Float, Long, Long) -> Unit
     ): Result<Uri> = withContext(Dispatchers.IO) {
-        if (!hasSufficientSpace()) {
-            return@withContext Result.failure(Exception("Insufficient phone storage. Please free up space."))
-        }
-
-        val request = Request.Builder().url(downloadUrl).build()
-        val response = okHttpClient.newCall(request).execute()
-
-        if (!response.isSuccessful) {
-            return@withContext Result.failure(Exception("HTTP error ${response.code} downloading media."))
-        }
-
-        val body = response.body ?: return@withContext Result.failure(Exception("Empty response body from media server."))
-        val contentLength = body.contentLength()
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val cleanAuthor = authorUsername.replace(Regex("[^a-zA-Z0-9_]"), "")
-        val extension = when (mediaType) {
-            MediaType.REEL, MediaType.POST_VIDEO -> "mp4"
-            MediaType.AUDIO -> "m4a"
-            else -> "jpg"
-        }
-        val uniqueSuffix = (1000..9999).random()
-        val fileName = "Insta_${cleanAuthor}_${timestamp}_${shortcode}_$uniqueSuffix.$extension"
-
-        val resolver = context.contentResolver
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-            put(MediaStore.MediaColumns.MIME_TYPE, getMimeType(mediaType))
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-                val relativePath = when (mediaType) {
-                    MediaType.REEL, MediaType.POST_VIDEO -> Environment.DIRECTORY_MOVIES + "/InstaSaver/$cleanAuthor"
-                    MediaType.AUDIO -> Environment.DIRECTORY_MUSIC + "/InstaSaver"
-                    else -> Environment.DIRECTORY_PICTURES + "/InstaSaver/$cleanAuthor"
-                }
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+        runCatching {
+            if (!hasSufficientSpace()) {
+                throw Exception("Insufficient phone storage. Please free up space.")
             }
-        }
 
-        val targetCollection = when (mediaType) {
-            MediaType.REEL, MediaType.POST_VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            MediaType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-            else -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        }
+            var safeUrl = downloadUrl.trim()
+            if (safeUrl.startsWith("//")) {
+                safeUrl = "https:$safeUrl"
+            } else if (safeUrl.startsWith("/")) {
+                safeUrl = "https://greatfon.io$safeUrl"
+            }
 
-        val insertedUri = resolver.insert(targetCollection, values)
-            ?: return@withContext Result.failure(Exception("Could not create MediaStore entry."))
+            if (!safeUrl.startsWith("http://") && !safeUrl.startsWith("https://")) {
+                throw IllegalArgumentException("Invalid media download URL: $safeUrl")
+            }
 
-        try {
-            if (mediaType == MediaType.AUDIO) {
-                val tempCacheVideo = File(context.cacheDir, "temp_${System.currentTimeMillis()}_$shortcode.mp4")
-                val tempCacheAudio = File(context.cacheDir, "temp_${System.currentTimeMillis()}_$shortcode.m4a")
+            val request = Request.Builder().url(safeUrl).build()
+            val response = okHttpClient.newCall(request).execute()
 
-                try {
-                    FileOutputStream(tempCacheVideo).use { fos ->
-                        body.byteStream().use { ins ->
-                            copyStreamWithProgress(ins, fos, contentLength, onProgress)
+            if (!response.isSuccessful) {
+                throw Exception("HTTP error ${response.code} downloading media.")
+            }
+
+            val body = response.body ?: throw Exception("Empty response body from media server.")
+            val contentLength = body.contentLength()
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val cleanAuthor = authorUsername.replace(Regex("[^a-zA-Z0-9_]"), "").ifEmpty { "instagram_creator" }
+            val extension = when (mediaType) {
+                MediaType.REEL, MediaType.POST_VIDEO -> "mp4"
+                MediaType.AUDIO -> "m4a"
+                else -> "jpg"
+            }
+            val uniqueSuffix = (1000..9999).random()
+            val fileName = "Insta_${cleanAuthor}_${timestamp}_${shortcode}_$uniqueSuffix.$extension"
+
+            val resolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, getMimeType(mediaType))
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    val relativePath = when (mediaType) {
+                        MediaType.REEL, MediaType.POST_VIDEO -> Environment.DIRECTORY_MOVIES + "/InstaSaver/$cleanAuthor"
+                        MediaType.AUDIO -> Environment.DIRECTORY_MUSIC + "/InstaSaver"
+                        else -> Environment.DIRECTORY_PICTURES + "/InstaSaver/$cleanAuthor"
+                    }
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                }
+            }
+
+            val targetCollection = when (mediaType) {
+                MediaType.REEL, MediaType.POST_VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                MediaType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                else -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            }
+
+            val insertedUri = resolver.insert(targetCollection, values)
+                ?: throw Exception("Could not create MediaStore entry.")
+
+            try {
+                if (mediaType == MediaType.AUDIO) {
+                    val tempCacheVideo = File(context.cacheDir, "temp_${System.currentTimeMillis()}_$shortcode.mp4")
+                    val tempCacheAudio = File(context.cacheDir, "temp_${System.currentTimeMillis()}_$shortcode.m4a")
+
+                    try {
+                        FileOutputStream(tempCacheVideo).use { fos ->
+                            body.byteStream().use { ins ->
+                                copyStreamWithProgress(ins, fos, contentLength, onProgress)
+                            }
+                        }
+
+                        val demuxSuccess = audioDemuxer.extractAudioTrackNative(tempCacheVideo, tempCacheAudio)
+                        val sourceAudioFile = if (demuxSuccess && tempCacheAudio.exists() && tempCacheAudio.length() > 0) {
+                            tempCacheAudio
+                        } else {
+                            tempCacheVideo
+                        }
+
+                        resolver.openOutputStream(insertedUri)?.use { outStream ->
+                            sourceAudioFile.inputStream().use { inStream ->
+                                inStream.copyTo(outStream)
+                            }
+                        }
+                    } finally {
+                        tempCacheVideo.delete()
+                        tempCacheAudio.delete()
+                    }
+                } else {
+                    resolver.openOutputStream(insertedUri)?.use { outputStream ->
+                        body.byteStream().use { inputStream ->
+                            copyStreamWithProgress(inputStream, outputStream, contentLength, onProgress)
                         }
                     }
-
-                    val demuxSuccess = audioDemuxer.extractAudioTrackNative(tempCacheVideo, tempCacheAudio)
-                    val sourceAudioFile = if (demuxSuccess && tempCacheAudio.exists() && tempCacheAudio.length() > 0) {
-                        tempCacheAudio
-                    } else {
-                        tempCacheVideo
-                    }
-
-                    resolver.openOutputStream(insertedUri)?.use { outStream ->
-                        sourceAudioFile.inputStream().use { inStream ->
-                            inStream.copyTo(outStream)
-                        }
-                    }
-                } finally {
-                    tempCacheVideo.delete()
-                    tempCacheAudio.delete()
                 }
-            } else {
-                resolver.openOutputStream(insertedUri)?.use { outputStream ->
-                    body.byteStream().use { inputStream ->
-                        copyStreamWithProgress(inputStream, outputStream, contentLength, onProgress)
-                    }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear()
+                    values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(insertedUri, values, null, null)
                 }
-            }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear()
-                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(insertedUri, values, null, null)
+                insertedUri
+            } catch (e: Exception) {
+                resolver.delete(insertedUri, null, null)
+                throw e
             }
-
-            Result.success(insertedUri)
-        } catch (e: Exception) {
-            resolver.delete(insertedUri, null, null)
-            Result.failure(e)
         }
     }
 

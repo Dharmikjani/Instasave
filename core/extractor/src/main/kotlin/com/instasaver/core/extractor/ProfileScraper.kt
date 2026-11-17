@@ -352,17 +352,39 @@ object ProfileScraper {
         val reels = mutableListOf<MediaItem>()
         val seenCodes = mutableSetOf<String>()
 
+        val baseDomain = when (sourcePrefix) {
+            "gf" -> "https://greatfon.io"
+            "dumpor" -> "https://dumpor.io"
+            "picuki" -> "https://www.picuki.com"
+            "imginn" -> "https://imginn.com"
+            "pixwox" -> "https://www.pixwox.com"
+            "anony" -> "https://anonyig.com"
+            "stories" -> "https://storiesig.info"
+            else -> ""
+        }
+
         val imgTags = doc.select("img")
         for (imgTag in imgTags) {
-            val src = imgTag.attr("src").ifEmpty {
-                imgTag.attr("data-src").ifEmpty {
-                    imgTag.attr("data-original").ifEmpty {
-                        imgTag.attr("data-lazy-src")
+            var src = imgTag.absUrl("src").ifEmpty {
+                imgTag.absUrl("data-src").ifEmpty {
+                    imgTag.absUrl("data-original").ifEmpty {
+                        imgTag.absUrl("data-lazy-src").ifEmpty {
+                            imgTag.attr("src").ifEmpty {
+                                imgTag.attr("data-src").ifEmpty {
+                                    imgTag.attr("data-original").ifEmpty {
+                                        imgTag.attr("data-lazy-src")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
             if (src.isBlank()) continue
-            val cleanImg = cleanUrl(src)
+            if (src.startsWith("/") && baseDomain.isNotEmpty()) {
+                src = "$baseDomain$src"
+            }
+            val cleanImg = cleanUrl(src, baseDomain)
 
             // Skip avatars, logos, icons, badges, small banners
             val lower = cleanImg.lowercase()
@@ -382,8 +404,13 @@ object ProfileScraper {
             var code = ""
             for (l in allLinks) {
                 val cleanLink = l.trim().trimEnd('/')
+                val pMatch = Regex("""/(?:p|reel|tv)/([A-Za-z0-9_-]{8,15})""").find(cleanLink)
+                if (pMatch != null) {
+                    code = pMatch.groupValues[1]
+                    break
+                }
                 val last = cleanLink.substringAfterLast('/')
-                if (last.isNotEmpty() && !last.equals(username, ignoreCase = true) && last.length >= 4) {
+                if (last.isNotEmpty() && !last.equals(username, ignoreCase = true) && last.length in 8..15 && last.matches(Regex("[A-Za-z0-9_-]+"))) {
                     code = last
                     break
                 }
@@ -400,11 +427,12 @@ object ProfileScraper {
 
             val caption = container?.selectFirst(".caption, .desc, .title, p")?.text()?.trim() ?: ""
 
+            val isInstagramCode = !code.startsWith(sourcePrefix) && code.length in 8..15
             val item = MediaItem(
                 id = code,
                 shortcode = code,
                 type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
-                url = if (code.startsWith(sourcePrefix)) "https://www.instagram.com/$username/" else "https://www.instagram.com/p/$code/",
+                url = if (isInstagramCode) "https://www.instagram.com/p/$code/" else "https://www.instagram.com/$username/",
                 downloadUrl = cleanImg,
                 thumbnailUrl = cleanImg,
                 title = (if (isVideo) "Reel" else "Post") + " by @$username",
@@ -480,7 +508,7 @@ object ProfileScraper {
         Log.d(TAG, "Greatfon response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, url)
 
         val avatar = doc.selectFirst(".user-avatar img, .avatar img, img.avatar")?.attr("src") ?: ""
         val fullName = doc.selectFirst(".user__title h1, h1")?.text()?.trim() ?: username
@@ -518,7 +546,7 @@ object ProfileScraper {
         Log.d(TAG, "Dumpor response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, url)
 
         val avatar = doc.selectFirst(".user-avatar img, .avatar img")?.attr("src") ?: ""
         val fullName = doc.selectFirst(".user__title h1, h1")?.text()?.trim() ?: username
@@ -556,7 +584,7 @@ object ProfileScraper {
         Log.d(TAG, "Picuki response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, url)
 
         val avatar = doc.selectFirst(".profile-avatar img")?.attr("src")
             ?: doc.selectFirst(".profile-avatar")?.attr("src") ?: ""
@@ -609,7 +637,7 @@ object ProfileScraper {
         Log.d(TAG, "Imginn response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, url)
 
         val avatar = doc.selectFirst(".avatar img")?.attr("src") ?: ""
         val fullName = doc.selectFirst(".username, h1, .name")?.text()?.trim() ?: username
@@ -662,7 +690,7 @@ object ProfileScraper {
         Log.d(TAG, "Pixwox response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, url)
 
         val avatar = doc.selectFirst(".head .avatar img")?.attr("src")
             ?: doc.selectFirst(".avatar img")?.attr("src") ?: ""
@@ -712,7 +740,7 @@ object ProfileScraper {
         Log.d(TAG, "StoriesIG response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, url)
 
         val avatar = doc.selectFirst(".profile__avatar img, .avatar img, img.avatar")?.attr("src") ?: ""
         val fullName = doc.selectFirst(".profile__name, h1")?.text()?.trim() ?: username
@@ -749,7 +777,7 @@ object ProfileScraper {
         Log.d(TAG, "AnonyIG response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, url)
 
         val avatar = doc.selectFirst(".profile__avatar img, img.avatar")?.attr("src") ?: ""
         val fullName = doc.selectFirst(".profile__name, h1")?.text()?.trim() ?: username
@@ -923,12 +951,99 @@ object ProfileScraper {
         }
     }
 
-    private fun cleanUrl(url: String): String {
+    fun cleanUrl(url: String, baseDomain: String = ""): String {
         if (url.isBlank()) return ""
         var cleaned = url.replace("&amp;", "&").replace("\\u0026", "&")
         if (cleaned.startsWith("//")) {
             cleaned = "https:$cleaned"
+        } else if (cleaned.startsWith("/") && baseDomain.isNotEmpty()) {
+            cleaned = "$baseDomain$cleaned"
         }
         return cleaned
+    }
+
+    suspend fun loadMoreMedia(usernameInput: String, page: Int): Result<Pair<List<MediaItem>, List<MediaItem>>> = withContext(Dispatchers.IO) {
+        val cleanUsername = sanitizeUsername(usernameInput)
+        if (cleanUsername.isEmpty()) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid username"))
+        }
+
+        // Tier 1: Greatfon page N
+        val gf = runCatching {
+            val url = "https://greatfon.io/v/$cleanUsername?page=$page"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Referer", "https://greatfon.io/v/$cleanUsername")
+                .build()
+            val response = InstagramHttpClient.client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val html = response.body?.string() ?: ""
+                val doc = Jsoup.parse(html, url)
+                val (reels, posts) = extractMediaFromDoc(doc, cleanUsername, "", "gf")
+                if (reels.isNotEmpty() || posts.isNotEmpty()) Pair(reels, posts) else null
+            } else null
+        }.getOrNull()
+        if (gf != null) return@withContext Result.success(gf)
+
+        // Tier 2: Dumpor page N
+        val dumpor = runCatching {
+            val url = "https://dumpor.io/v/$cleanUsername?page=$page"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Referer", "https://dumpor.io/v/$cleanUsername")
+                .build()
+            val response = InstagramHttpClient.client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val html = response.body?.string() ?: ""
+                val doc = Jsoup.parse(html, url)
+                val (reels, posts) = extractMediaFromDoc(doc, cleanUsername, "", "dumpor")
+                if (reels.isNotEmpty() || posts.isNotEmpty()) Pair(reels, posts) else null
+            } else null
+        }.getOrNull()
+        if (dumpor != null) return@withContext Result.success(dumpor)
+
+        // Tier 3: Picuki page N
+        val picuki = runCatching {
+            val url = "https://www.picuki.com/profile/$cleanUsername/$page"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("Referer", "https://www.picuki.com/profile/$cleanUsername")
+                .build()
+            val response = InstagramHttpClient.client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val html = response.body?.string() ?: ""
+                val doc = Jsoup.parse(html, url)
+                val (reels, posts) = extractMediaFromDoc(doc, cleanUsername, "", "picuki")
+                if (reels.isNotEmpty() || posts.isNotEmpty()) Pair(reels, posts) else null
+            } else null
+        }.getOrNull()
+        if (picuki != null) return@withContext Result.success(picuki)
+
+        // Tier 4: Imginn page N
+        val imginn = runCatching {
+            val url = "https://imginn.com/$cleanUsername/?page=$page"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("Referer", "https://imginn.com/$cleanUsername/")
+                .build()
+            val response = InstagramHttpClient.client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val html = response.body?.string() ?: ""
+                val doc = Jsoup.parse(html, url)
+                val (reels, posts) = extractMediaFromDoc(doc, cleanUsername, "", "imginn")
+                if (reels.isNotEmpty() || posts.isNotEmpty()) Pair(reels, posts) else null
+            } else null
+        }.getOrNull()
+        if (imginn != null) return@withContext Result.success(imginn)
+
+        return@withContext Result.success(Pair(emptyList(), emptyList()))
     }
 }

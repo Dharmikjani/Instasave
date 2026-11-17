@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,9 +33,11 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.runtime.snapshotFlow
 import com.instasaver.feature.profile.ui.components.VideoPlayerView
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -120,10 +124,17 @@ fun ProfileExplorerScreen(
         }
     }
 
+    val successState = uiState as? ProfileUiState.Success
     val isLoading = uiState is ProfileUiState.Loading
-    val profileData = (uiState as? ProfileUiState.Success)?.profile
-    val isPinned = (uiState as? ProfileUiState.Success)?.isPinned ?: false
+    val profileData = successState?.profile
+    val isPinned = successState?.isPinned ?: false
+    val isLoadingMore = successState?.isLoadingMore ?: false
+    val hasMore = successState?.hasMore ?: true
+    val previewMedia = successState?.previewMedia ?: selectedPreviewMedia
+    val isResolvingPreview = successState?.isResolvingPreview ?: false
     val errorMessage = (uiState as? ProfileUiState.Error)?.message
+
+    val gridState = rememberLazyGridState()
 
     LaunchedEffect(profileData) {
         if (profileData != null) {
@@ -391,6 +402,16 @@ fun ProfileExplorerScreen(
                 }
 
                 val mediaList = if (selectedTab == 0) profile.posts else profile.reels
+
+                LaunchedEffect(gridState, mediaList.size, selectedTab) {
+                    snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
+                        .collect { lastIndex ->
+                            if (lastIndex != null && lastIndex >= mediaList.size - 3 && !isLoadingMore && hasMore) {
+                                viewModel.onIntent(ProfileUiIntent.LoadMore(isReels = selectedTab == 1))
+                            }
+                        }
+                }
+
                 if (mediaList.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -418,17 +439,19 @@ fun ProfileExplorerScreen(
                     }
                 } else {
                     LazyVerticalGrid(
+                        state = gridState,
                         columns = GridCells.Fixed(3),
                         modifier = Modifier.fillMaxSize().padding(2.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        items(mediaList) { item ->
+                        items(mediaList, key = { it.shortcode.ifEmpty { it.id } }) { item ->
                             Box(
                                 modifier = Modifier
                                     .aspectRatio(1f)
                                     .clickable {
                                         selectedPreviewMedia = item
+                                        viewModel.onIntent(ProfileUiIntent.OpenPreview(item))
                                     }
                             ) {
                                 AsyncImage(
@@ -469,24 +492,53 @@ fun ProfileExplorerScreen(
                                 }
                             }
                         }
+
+                        if (isLoadingMore) {
+                            item(span = { GridItemSpan(3) }) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = IgPink,
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                        Text("Loading more from Instagram...", color = TextSecondary, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        selectedPreviewMedia?.let { media ->
+        previewMedia?.let { media ->
             ProfileMediaPreviewDialog(
                 media = media,
-                onDismiss = { selectedPreviewMedia = null },
+                isResolving = isResolvingPreview,
+                onDismiss = {
+                    selectedPreviewMedia = null
+                    viewModel.onIntent(ProfileUiIntent.DismissPreview)
+                },
                 onDownload = {
                     viewModel.onIntent(ProfileUiIntent.DownloadItem(media))
                     Toast.makeText(context, "Downloading to Gallery...", Toast.LENGTH_SHORT).show()
                     selectedPreviewMedia = null
+                    viewModel.onIntent(ProfileUiIntent.DismissPreview)
                 },
                 onDownloadAudio = {
                     viewModel.onIntent(ProfileUiIntent.DownloadAudio(media))
                     Toast.makeText(context, "Extracting Audio (M4A)...", Toast.LENGTH_SHORT).show()
                     selectedPreviewMedia = null
+                    viewModel.onIntent(ProfileUiIntent.DismissPreview)
                 },
                 onShare = {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -703,6 +755,7 @@ fun HdDpDialog(
 @Composable
 fun ProfileMediaPreviewDialog(
     media: MediaItem,
+    isResolving: Boolean = false,
     onDismiss: () -> Unit,
     onDownload: () -> Unit,
     onDownloadAudio: () -> Unit,
@@ -729,12 +782,22 @@ fun ProfileMediaPreviewDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isVideo) "Reel Preview" else "Photo Preview",
-                            color = TextPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (isVideo) "Reel Preview" else "Photo Preview",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            if (isResolving) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                CircularProgressIndicator(
+                                    color = IgPink,
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 1.5.dp
+                                )
+                            }
+                        }
                         Text("@${media.authorUsername}", color = IgPink, fontSize = 12.sp)
                     }
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
@@ -751,38 +814,49 @@ fun ProfileMediaPreviewDialog(
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color.Black)
                 ) {
-                    if (isVideo) {
+                    val hasDirectVideo = isVideo && (media.downloadUrl.contains(".mp4") || (!media.downloadUrl.endsWith(".jpg") && !media.downloadUrl.endsWith(".jpeg") && media.downloadUrl != media.thumbnailUrl))
+                    if (hasDirectVideo) {
                         VideoPlayerView(
                             videoUrl = media.downloadUrl,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        AsyncImage(
-                            model = media.downloadUrl.ifEmpty { media.thumbnailUrl },
-                            contentDescription = "Preview",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(Unit) {
-                                    detectTransformGestures { _, pan, zoom, _ ->
-                                        scale = (scale * zoom).coerceIn(1f, 5f)
-                                        if (scale > 1f) {
-                                            val maxOffset = (scale - 1f) * 300f
-                                            offsetX = (offsetX + pan.x).coerceIn(-maxOffset, maxOffset)
-                                            offsetY = (offsetY + pan.y).coerceIn(-maxOffset, maxOffset)
-                                        } else {
-                                            offsetX = 0f
-                                            offsetY = 0f
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            AsyncImage(
+                                model = media.downloadUrl.ifEmpty { media.thumbnailUrl },
+                                contentDescription = "Preview",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        detectTransformGestures { _, pan, zoom, _ ->
+                                            scale = (scale * zoom).coerceIn(1f, 5f)
+                                            if (scale > 1f) {
+                                                val maxOffset = (scale - 1f) * 300f
+                                                offsetX = (offsetX + pan.x).coerceIn(-maxOffset, maxOffset)
+                                                offsetY = (offsetY + pan.y).coerceIn(-maxOffset, maxOffset)
+                                            } else {
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                            }
                                         }
                                     }
-                                }
-                                .graphicsLayer {
-                                    scaleX = scale
-                                    scaleY = scale
-                                    translationX = offsetX
-                                    translationY = offsetY
-                                }
-                        )
+                                    .graphicsLayer {
+                                        scaleX = scale
+                                        scaleY = scale
+                                        translationX = offsetX
+                                        translationY = offsetY
+                                    }
+                            )
+                            if (isVideo) {
+                                Icon(
+                                    Icons.Default.PlayCircle,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                            }
+                        }
                     }
                 }
 

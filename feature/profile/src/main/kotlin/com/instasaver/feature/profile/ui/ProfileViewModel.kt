@@ -19,7 +19,14 @@ import javax.inject.Inject
 sealed interface ProfileUiState {
     object Idle : ProfileUiState
     object Loading : ProfileUiState
-    data class Success(val profile: ProfileData, val isPinned: Boolean) : ProfileUiState
+    data class Success(
+        val profile: ProfileData,
+        val isPinned: Boolean,
+        val isLoadingMore: Boolean = false,
+        val hasMore: Boolean = true,
+        val previewMedia: MediaItem? = null,
+        val isResolvingPreview: Boolean = false
+    ) : ProfileUiState
     data class Error(val message: String) : ProfileUiState
 }
 
@@ -29,6 +36,9 @@ sealed interface ProfileUiIntent {
     data class DownloadItem(val item: MediaItem) : ProfileUiIntent
     data class DownloadBatch(val items: List<MediaItem>) : ProfileUiIntent
     data class DownloadAudio(val item: MediaItem) : ProfileUiIntent
+    data class LoadMore(val isReels: Boolean) : ProfileUiIntent
+    data class OpenPreview(val item: MediaItem) : ProfileUiIntent
+    object DismissPreview : ProfileUiIntent
 }
 
 @HiltViewModel
@@ -42,6 +52,10 @@ class ProfileViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<ProfileUiState>(ProfileUiState.Idle)
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
 
+    private var currentPostsPage = 1
+    private var currentReelsPage = 1
+    private var isPaginating = false
+
     fun onIntent(intent: ProfileUiIntent) {
         when (intent) {
             is ProfileUiIntent.Search -> searchProfile(intent.username)
@@ -49,6 +63,9 @@ class ProfileViewModel @Inject constructor(
             is ProfileUiIntent.DownloadItem -> downloadItem(intent.item)
             is ProfileUiIntent.DownloadBatch -> downloadBatch(intent.items)
             is ProfileUiIntent.DownloadAudio -> downloadAudio(intent.item)
+            is ProfileUiIntent.LoadMore -> loadMore(intent.isReels)
+            is ProfileUiIntent.OpenPreview -> openPreview(intent.item)
+            is ProfileUiIntent.DismissPreview -> dismissPreview()
         }
     }
 
@@ -70,6 +87,10 @@ class ProfileViewModel @Inject constructor(
             _uiState.value = ProfileUiState.Error("Please enter a valid Instagram username.")
             return
         }
+
+        currentPostsPage = 1
+        currentReelsPage = 1
+        isPaginating = false
 
         viewModelScope.launch {
             _uiState.value = ProfileUiState.Loading
@@ -99,58 +120,74 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
-    private fun resolveMediaUrl(item: MediaItem): suspend () -> MediaItem = {
-        if (item.type == MediaType.REEL && (item.downloadUrl.endsWith(".jpg") || item.downloadUrl.endsWith(".jpeg") || item.downloadUrl == item.thumbnailUrl)) {
-            val fresh = extractorRepository.extractMedia(item.url)
-            if (fresh.isSuccess) fresh.getOrThrow() else item
-        } else {
+    private fun loadMore(isReels: Boolean) {
+        val currentState = _uiState.value as? ProfileUiState.Success ?: return
+        if (isPaginating || !currentState.hasMore) return
+
+        isPaginating = true
+        _uiState.value = currentState.copy(isLoadingMore = true)
+
+        val nextPage = if (isReels) currentReelsPage + 1 else currentPostsPage + 1
+        viewModelScope.launch {
+            val result = profileRepository.loadMoreMedia(currentState.profile.username, nextPage)
+            result.onSuccess { (newReels, newPosts) ->
+                val stateNow = _uiState.value as? ProfileUiState.Success
+                if (stateNow != null) {
+                    val mergedReels = (stateNow.profile.reels + newReels).distinctBy { it.shortcode.ifEmpty { it.id } }
+                    val mergedPosts = (stateNow.profile.posts + newPosts).distinctBy { it.shortcode.ifEmpty { it.id } }
+                    val hasMoreItems = if (isReels) newReels.isNotEmpty() else newPosts.isNotEmpty()
+                    if (isReels) currentReelsPage = nextPage else currentPostsPage = nextPage
+                    _uiState.value = stateNow.copy(
+                        profile = stateNow.profile.copy(reels = mergedReels, posts = mergedPosts),
+                        isLoadingMore = false,
+                        hasMore = hasMoreItems
+                    )
+                }
+            }.onFailure {
+                val stateNow = _uiState.value as? ProfileUiState.Success
+                if (stateNow != null) {
+                    _uiState.value = stateNow.copy(isLoadingMore = false)
+                }
+            }
+            isPaginating = false
+        }
+    }
+
+    private fun openPreview(item: MediaItem) {
+        val currentState = _uiState.value as? ProfileUiState.Success ?: return
+        _uiState.value = currentState.copy(previewMedia = item, isResolvingPreview = true)
+
+        viewModelScope.launch {
+            val resolved = resolveMediaUrl(item)
+            val stateNow = _uiState.value as? ProfileUiState.Success
+            if (stateNow != null && stateNow.previewMedia?.id == item.id) {
+                _uiState.value = stateNow.copy(previewMedia = resolved, isResolvingPreview = false)
+            }
+        }
+    }
+
+    private fun dismissPreview() {
+        val currentState = _uiState.value as? ProfileUiState.Success ?: return
+        _uiState.value = currentState.copy(previewMedia = null, isResolvingPreview = false)
+    }
+
+    private suspend fun resolveMediaUrl(item: MediaItem): MediaItem {
+        return try {
+            if (item.url.contains("/p/") || item.url.contains("/reel/")) {
+                val fresh = extractorRepository.extractMedia(item.url)
+                if (fresh.isSuccess) fresh.getOrThrow() else item
+            } else {
+                item
+            }
+        } catch (e: Exception) {
             item
         }
     }
 
     private fun downloadItem(item: MediaItem) {
         viewModelScope.launch {
-            val targetItem = resolveMediaUrl(item)()
-            val result = storageService.saveMediaToGallery(
-                downloadUrl = targetItem.downloadUrl,
-                authorUsername = targetItem.authorUsername,
-                shortcode = targetItem.shortcode,
-                mediaType = targetItem.type
-            )
-            result.onSuccess { uri ->
-                databaseRepository.recordDownload(
-                    shortcode = targetItem.shortcode,
-                    fileName = targetItem.title.ifBlank { "Media by @${targetItem.authorUsername}" },
-                    savedUri = uri.toString()
-                )
-            }
-        }
-    }
-
-    private fun downloadAudio(item: MediaItem) {
-        viewModelScope.launch {
-            val targetItem = resolveMediaUrl(item)()
-            val audioUrl = targetItem.audioTrack?.audioUrl ?: targetItem.downloadUrl
-            val result = storageService.saveMediaToGallery(
-                downloadUrl = audioUrl,
-                authorUsername = targetItem.authorUsername,
-                shortcode = targetItem.shortcode,
-                mediaType = MediaType.AUDIO
-            )
-            result.onSuccess { uri ->
-                databaseRepository.recordDownload(
-                    shortcode = targetItem.shortcode,
-                    fileName = "Audio - @${targetItem.authorUsername}",
-                    savedUri = uri.toString()
-                )
-            }
-        }
-    }
-
-    private fun downloadBatch(items: List<MediaItem>) {
-        viewModelScope.launch {
-            for (item in items) {
-                val targetItem = resolveMediaUrl(item)()
+            try {
+                val targetItem = resolveMediaUrl(item)
                 val result = storageService.saveMediaToGallery(
                     downloadUrl = targetItem.downloadUrl,
                     authorUsername = targetItem.authorUsername,
@@ -163,6 +200,57 @@ class ProfileViewModel @Inject constructor(
                         fileName = targetItem.title.ifBlank { "Media by @${targetItem.authorUsername}" },
                         savedUri = uri.toString()
                     )
+                }
+            } catch (e: Exception) {
+                // Handled gracefully without crash
+            }
+        }
+    }
+
+    private fun downloadAudio(item: MediaItem) {
+        viewModelScope.launch {
+            try {
+                val targetItem = resolveMediaUrl(item)
+                val audioUrl = targetItem.audioTrack?.audioUrl ?: targetItem.downloadUrl
+                val result = storageService.saveMediaToGallery(
+                    downloadUrl = audioUrl,
+                    authorUsername = targetItem.authorUsername,
+                    shortcode = targetItem.shortcode,
+                    mediaType = MediaType.AUDIO
+                )
+                result.onSuccess { uri ->
+                    databaseRepository.recordDownload(
+                        shortcode = targetItem.shortcode,
+                        fileName = "Audio - @${targetItem.authorUsername}",
+                        savedUri = uri.toString()
+                    )
+                }
+            } catch (e: Exception) {
+                // Handled gracefully without crash
+            }
+        }
+    }
+
+    private fun downloadBatch(items: List<MediaItem>) {
+        viewModelScope.launch {
+            for (item in items) {
+                try {
+                    val targetItem = resolveMediaUrl(item)
+                    val result = storageService.saveMediaToGallery(
+                        downloadUrl = targetItem.downloadUrl,
+                        authorUsername = targetItem.authorUsername,
+                        shortcode = targetItem.shortcode,
+                        mediaType = targetItem.type
+                    )
+                    result.onSuccess { uri ->
+                        databaseRepository.recordDownload(
+                            shortcode = targetItem.shortcode,
+                            fileName = targetItem.title.ifBlank { "Media by @${targetItem.authorUsername}" },
+                            savedUri = uri.toString()
+                        )
+                    }
+                } catch (e: Exception) {
+                    // Handled gracefully
                 }
                 kotlinx.coroutines.delay(350)
             }

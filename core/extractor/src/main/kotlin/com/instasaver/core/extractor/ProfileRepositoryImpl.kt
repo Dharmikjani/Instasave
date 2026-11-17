@@ -30,4 +30,21 @@ class ProfileRepositoryImpl @Inject constructor(
         }
         return result
     }
+
+    override suspend fun loadMoreMedia(username: String, page: Int): Result<Pair<List<com.instasaver.core.model.MediaItem>, List<com.instasaver.core.model.MediaItem>>> {
+        val cleanUser = ProfileScraper.sanitizeUsername(username)
+        val result = ProfileScraper.loadMoreMedia(cleanUser, page)
+        result.onSuccess { (newReels, newPosts) ->
+            if (newReels.isNotEmpty() || newPosts.isNotEmpty()) {
+                val cached = databaseRepository.getCachedProfile(cleanUser)
+                if (cached != null) {
+                    val mergedReels = (cached.reels + newReels).distinctBy { it.shortcode.ifEmpty { it.id } }
+                    val mergedPosts = (cached.posts + newPosts).distinctBy { it.shortcode.ifEmpty { it.id } }
+                    val updated = cached.copy(reels = mergedReels, posts = mergedPosts)
+                    databaseRepository.saveProfileCache(cleanUser, updated)
+                }
+            }
+        }
+        return result
+    }
 }

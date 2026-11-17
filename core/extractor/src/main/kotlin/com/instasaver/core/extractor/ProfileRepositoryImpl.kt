@@ -15,16 +15,16 @@ class ProfileRepositoryImpl @Inject constructor(
     override suspend fun getProfile(username: String): Result<ProfileData> {
         val cleanUser = username.trim().removePrefix("@").lowercase()
         if (cleanUser.isNotBlank()) {
-            // Check Tier 0 Cache (6h TTL)
+            // Check Tier 0 Cache (6h TTL) - only return if it has meaningful data
             val cached = databaseRepository.getCachedProfile(cleanUser)
-            if (cached != null) {
+            if (cached != null && (cached.posts.isNotEmpty() || cached.reels.isNotEmpty() || cached.followersCount.isNotEmpty())) {
                 return Result.success(cached)
             }
         }
 
         val result = ProfileScraper.getProfile(cleanUser)
         result.onSuccess { profile ->
-            if (profile.username.isNotBlank()) {
+            if (profile.username.isNotBlank() && (profile.posts.isNotEmpty() || profile.reels.isNotEmpty() || profile.followersCount.isNotEmpty())) {
                 databaseRepository.saveProfileCache(profile.username, profile)
             }
         }

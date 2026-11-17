@@ -25,10 +25,15 @@ class InstagramHeadersInterceptor @Inject constructor() : Interceptor {
         val host = original.url.host
         val originalUa = original.header("User-Agent")
         val effectiveUa = if (!originalUa.isNullOrBlank()) originalUa else USER_AGENT_ANDROID
+        val originalAccept = original.header("Accept")
+        val effectiveAccept = if (!originalAccept.isNullOrBlank()) originalAccept else "*/*"
+        val originalLang = original.header("Accept-Language")
+        val effectiveLang = if (!originalLang.isNullOrBlank()) originalLang else "en-US,en;q=0.9"
+
         val requestBuilder = original.newBuilder()
             .header("User-Agent", effectiveUa)
-            .header("Accept", "*/*")
-            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Accept", effectiveAccept)
+            .header("Accept-Language", effectiveLang)
 
         // Only attach internal Instagram API/AJAX headers and cookies to instagram.com web/api domains,
         // NEVER to static CDN domains (cdninstagram.com, fbcdn.net) as it breaks Akamai/Cloudflare caching & security.

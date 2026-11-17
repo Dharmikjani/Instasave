@@ -1,5 +1,6 @@
 package com.instasaver.core.extractor
 
+import android.util.Log
 import android.webkit.CookieManager
 import com.instasaver.core.model.MediaItem
 import com.instasaver.core.model.MediaType
@@ -15,16 +16,19 @@ import java.util.regex.Pattern
 
 object ProfileScraper {
 
+    private const val TAG = "ProfileScraper"
     private const val IG_APP_ID = "936619743392459"
     private const val ASBD_ID = "129477"
 
     private val STATS_PATTERN = Pattern.compile("([0-9.,]+[KMBkmb]?)\\s*Followers,\\s*([0-9.,]+[KMBkmb]?)\\s*Following,\\s*([0-9.,]+)\\s*Posts", Pattern.CASE_INSENSITIVE)
 
     suspend fun getProfile(usernameInput: String): Result<ProfileData> = withContext(Dispatchers.IO) {
-        val cleanUsername = usernameInput.trim().removePrefix("@")
+        val cleanUsername = usernameInput.trim().removePrefix("@").lowercase()
         if (cleanUsername.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Please enter a valid Instagram username"))
         }
+
+        Log.d(TAG, "Starting resilient profile scrape for @$cleanUsername")
 
         // 1. Initialize anonymous guest cookies if needed
         InstagramHttpClient.ensureGuestCookies()
@@ -32,67 +36,90 @@ object ProfileScraper {
         // 2. Tier 1: Instagram Official Web Profile Info API (with Desktop Chrome headers)
         val apiResult = runCatching { fetchWebProfileInfo(cleanUsername) }
         val apiProfile = if (apiResult.isSuccess) apiResult.getOrNull() else null
-
-        // If API gave us content (reels or posts), return immediately
-        if (apiProfile != null && (apiProfile.reels.isNotEmpty() || apiProfile.posts.isNotEmpty() || apiProfile.isPrivate)) {
-            return@withContext Result.success(apiProfile)
+        if (apiProfile != null) {
+            Log.d(TAG, "Tier 1 WebProfileInfo returned: posts=${apiProfile.posts.size}, reels=${apiProfile.reels.size}, followers=${apiProfile.followersCount}")
+        } else {
+            Log.d(TAG, "Tier 1 WebProfileInfo failed: ${apiResult.exceptionOrNull()?.message}")
         }
 
-        // 3. Tier 2: Public Mirror (Picuki / Imginn) — fetches real bio & posts without login
+        // 3. Tier 2: Public Mirrors (Greatfon / Dumpor / Picuki / Imginn / Pixwox / StoriesIG / AnonyIG)
         val mirrorResult = runCatching { fetchProfileFromMirror(cleanUsername) }
         val mirrorProfile = if (mirrorResult.isSuccess) mirrorResult.getOrNull() else null
-
-        if (mirrorProfile != null && (mirrorProfile.posts.isNotEmpty() || mirrorProfile.reels.isNotEmpty())) {
-            // Merge with API profile if API had stats/verified status
-            if (apiProfile != null) {
-                return@withContext Result.success(
-                    mirrorProfile.copy(
-                        fullName = apiProfile.fullName.ifEmpty { mirrorProfile.fullName },
-                        hdAvatarUrl = apiProfile.hdAvatarUrl.ifEmpty { mirrorProfile.hdAvatarUrl },
-                        isVerified = apiProfile.isVerified || mirrorProfile.isVerified,
-                        followersCount = if (apiProfile.followersCount.isNotEmpty() && apiProfile.followersCount != "0") apiProfile.followersCount else mirrorProfile.followersCount,
-                        followingCount = if (apiProfile.followingCount.isNotEmpty() && apiProfile.followingCount != "0") apiProfile.followingCount else mirrorProfile.followingCount,
-                        postsCount = if (apiProfile.postsCount > 0) apiProfile.postsCount else mirrorProfile.postsCount,
-                        bio = mirrorProfile.bio.ifEmpty { apiProfile.bio }
-                    )
-                )
-            }
-            return@withContext Result.success(mirrorProfile)
+        if (mirrorProfile != null) {
+            Log.d(TAG, "Tier 2 Mirror returned: posts=${mirrorProfile.posts.size}, reels=${mirrorProfile.reels.size}, bio=${mirrorProfile.bio.take(30)}")
+        } else {
+            Log.d(TAG, "Tier 2 Mirror failed: ${mirrorResult.exceptionOrNull()?.message}")
         }
 
         // 4. Tier 3: HTML Page + Meta Description Stats + Embedded Script Parsing
         val htmlResult = runCatching { fetchProfileFromHtmlWithScraping(cleanUsername) }
         val htmlProfile = if (htmlResult.isSuccess) htmlResult.getOrNull() else null
-
-        return@withContext when {
-            // Both methods succeeded — merge: prefer API stats, HTML content as fallback
-            apiProfile != null && htmlProfile != null -> {
-                Result.success(
-                    htmlProfile.copy(
-                        fullName = apiProfile.fullName.ifEmpty { htmlProfile.fullName },
-                        hdAvatarUrl = apiProfile.hdAvatarUrl.ifEmpty { htmlProfile.hdAvatarUrl },
-                        isVerified = apiProfile.isVerified || htmlProfile.isVerified,
-                        isPrivate = apiProfile.isPrivate,
-                        // CRITICAL: Always use API stats if available (they are accurate integers)
-                        followersCount = if (apiProfile.followersCount.isNotEmpty() && apiProfile.followersCount != "0") apiProfile.followersCount else htmlProfile.followersCount,
-                        followingCount = if (apiProfile.followingCount.isNotEmpty() && apiProfile.followingCount != "0") apiProfile.followingCount else htmlProfile.followingCount,
-                        postsCount = if (apiProfile.postsCount > 0) apiProfile.postsCount else htmlProfile.postsCount,
-                        reels = if (apiProfile.reels.isNotEmpty()) apiProfile.reels else htmlProfile.reels,
-                        posts = if (apiProfile.posts.isNotEmpty()) apiProfile.posts else htmlProfile.posts
-                    )
-                )
-            }
-            // Only API succeeded
-            apiProfile != null -> Result.success(apiProfile)
-            // Only Mirror succeeded
-            mirrorProfile != null -> Result.success(mirrorProfile)
-            // Only HTML succeeded
-            htmlProfile != null -> Result.success(htmlProfile)
-            // All failed
-            else -> {
-                Result.failure(Exception("Unable to load profile for @$cleanUsername. Please check your internet connection or verify the username."))
-            }
+        if (htmlProfile != null) {
+            Log.d(TAG, "Tier 3 HTML returned: posts=${htmlProfile.posts.size}, reels=${htmlProfile.reels.size}, followers=${htmlProfile.followersCount}")
+        } else {
+            Log.d(TAG, "Tier 3 HTML failed: ${htmlResult.exceptionOrNull()?.message}")
         }
+
+        // Intelligently merge results across all tiers, deduplicating by ID or shortcode
+        val mergedPosts = (apiProfile?.posts.orEmpty() + mirrorProfile?.posts.orEmpty() + htmlProfile?.posts.orEmpty()).distinctBy { it.id.ifEmpty { it.shortcode } }
+        val mergedReels = (apiProfile?.reels.orEmpty() + mirrorProfile?.reels.orEmpty() + htmlProfile?.reels.orEmpty()).distinctBy { it.id.ifEmpty { it.shortcode } }
+
+        val bestFullName = apiProfile?.fullName?.takeIf { it.isNotBlank() && it != cleanUsername }
+            ?: htmlProfile?.fullName?.takeIf { it.isNotBlank() && it != cleanUsername }
+            ?: mirrorProfile?.fullName?.takeIf { it.isNotBlank() && it != cleanUsername }
+            ?: cleanUsername
+
+        val bestAvatar = apiProfile?.hdAvatarUrl?.takeIf { it.isNotBlank() }
+            ?: htmlProfile?.hdAvatarUrl?.takeIf { it.isNotBlank() }
+            ?: mirrorProfile?.hdAvatarUrl?.takeIf { it.isNotBlank() }
+            ?: ""
+
+        val bestBio = mirrorProfile?.bio?.takeIf { it.isNotBlank() }
+            ?: apiProfile?.bio?.takeIf { it.isNotBlank() }
+            ?: htmlProfile?.bio?.takeIf { it.isNotBlank() }
+            ?: ""
+
+        val bestFollowers = apiProfile?.followersCount?.takeIf { it.isNotBlank() && it != "0" }
+            ?: htmlProfile?.followersCount?.takeIf { it.isNotBlank() && it != "0" }
+            ?: mirrorProfile?.followersCount?.takeIf { it.isNotBlank() && it != "0" }
+            ?: ""
+
+        val bestFollowing = apiProfile?.followingCount?.takeIf { it.isNotBlank() && it != "0" }
+            ?: htmlProfile?.followingCount?.takeIf { it.isNotBlank() && it != "0" }
+            ?: mirrorProfile?.followingCount?.takeIf { it.isNotBlank() && it != "0" }
+            ?: ""
+
+        val bestPostsCount = when {
+            apiProfile?.postsCount != null && apiProfile.postsCount > 0 -> apiProfile.postsCount
+            htmlProfile?.postsCount != null && htmlProfile.postsCount > 0 -> htmlProfile.postsCount
+            mirrorProfile?.postsCount != null && mirrorProfile.postsCount > 0 -> mirrorProfile.postsCount
+            else -> mergedReels.size + mergedPosts.size
+        }
+
+        val isPrivate = apiProfile?.isPrivate ?: htmlProfile?.isPrivate ?: false
+        val isVerified = apiProfile?.isVerified == true || mirrorProfile?.isVerified == true || htmlProfile?.isVerified == true
+        val externalUrl = apiProfile?.externalUrl.orEmpty().ifEmpty { htmlProfile?.externalUrl.orEmpty() }
+
+        if (apiProfile != null || mirrorProfile != null || htmlProfile != null) {
+            val finalProfile = ProfileData(
+                username = cleanUsername,
+                fullName = bestFullName,
+                bio = bestBio,
+                hdAvatarUrl = cleanUrl(bestAvatar),
+                isPrivate = isPrivate,
+                isVerified = isVerified,
+                postsCount = bestPostsCount,
+                followersCount = bestFollowers,
+                followingCount = bestFollowing,
+                externalUrl = externalUrl,
+                reels = mergedReels,
+                posts = mergedPosts
+            )
+            Log.d(TAG, "Loaded profile for @$cleanUsername: posts=${mergedPosts.size}, reels=${mergedReels.size}, followers=$bestFollowers")
+            return@withContext Result.success(finalProfile)
+        }
+
+        Result.failure(Exception("Unable to load profile for @$cleanUsername. Please check your internet connection or verify the username."))
     }
 
     private fun fetchWebProfileInfo(username: String): ProfileData? {
@@ -114,7 +141,7 @@ object ProfileScraper {
             .header("Accept", "*/*")
             .header("Accept-Language", "en-US,en;q=0.9")
 
-        // Attach WebView cookies directly
+        // Attach WebView cookies directly if authenticated
         try {
             val cm = CookieManager.getInstance()
             val cookies = cm.getCookie("https://www.instagram.com")
@@ -135,6 +162,7 @@ object ProfileScraper {
         }
 
         val response = InstagramHttpClient.client.newCall(requestBuilder.build()).execute()
+        Log.d(TAG, "WebProfileInfo HTTP ${response.code}")
         if (!response.isSuccessful) {
             return fetchMobileApiProfile(username)
         }
@@ -300,26 +328,208 @@ object ProfileScraper {
     }
 
     /**
-     * Tier 2 Public Mirror layer (Picuki / Imginn) that reliably returns 12 posts & real bio
-     * without requiring an active user login.
+     * Universal parser that reliably extracts real media cards from any mirror HTML
+     */
+    private fun extractMediaFromDoc(
+        doc: org.jsoup.nodes.Document,
+        username: String,
+        avatarUrl: String,
+        sourcePrefix: String
+    ): Pair<List<MediaItem>, List<MediaItem>> {
+        val posts = mutableListOf<MediaItem>()
+        val reels = mutableListOf<MediaItem>()
+        val seenCodes = mutableSetOf<String>()
+
+        val imgTags = doc.select("img")
+        for (imgTag in imgTags) {
+            val src = imgTag.attr("src").ifEmpty {
+                imgTag.attr("data-src").ifEmpty {
+                    imgTag.attr("data-original").ifEmpty {
+                        imgTag.attr("data-lazy-src")
+                    }
+                }
+            }
+            if (src.isBlank()) continue
+            val cleanImg = cleanUrl(src)
+
+            // Skip avatars, logos, icons, badges, small banners
+            val lower = cleanImg.lowercase()
+            if (lower.contains("logo") || lower.contains("icon") || lower.contains("avatar") || cleanImg == avatarUrl) {
+                continue
+            }
+            if (lower.contains("blank.gif") || lower.contains("data:image") || lower.contains("pixel")) {
+                continue
+            }
+
+            // Find enclosing card / container
+            val container = imgTag.parents().firstOrNull { it.tagName() == "div" || it.tagName() == "figure" || it.tagName() == "li" || it.tagName() == "a" } ?: imgTag.parent()
+
+            // Find any link associated with this image
+            val allLinks = imgTag.parents().select("a[href]").map { it.attr("href") } +
+                    listOfNotNull(imgTag.closest("a")?.attr("href"))
+            var code = ""
+            for (l in allLinks) {
+                val cleanLink = l.trim().trimEnd('/')
+                val last = cleanLink.substringAfterLast('/')
+                if (last.isNotEmpty() && !last.equals(username, ignoreCase = true) && last.length >= 4) {
+                    code = last
+                    break
+                }
+            }
+
+            if (code.isEmpty()) {
+                code = "${sourcePrefix}_" + Math.abs(cleanImg.hashCode()).toString(36)
+            }
+
+            if (!seenCodes.add(code)) continue
+
+            val isVideo = container?.selectFirst(".video, .icon_video, .video-icon, .play, video, [data-type='video']") != null ||
+                    allLinks.any { it.contains("/reel/") || it.contains("/tv/") }
+
+            val caption = container?.selectFirst(".caption, .desc, .title, p")?.text()?.trim() ?: ""
+
+            val item = MediaItem(
+                id = code,
+                shortcode = code,
+                type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
+                url = if (code.startsWith(sourcePrefix)) "https://www.instagram.com/$username/" else "https://www.instagram.com/p/$code/",
+                downloadUrl = cleanImg,
+                thumbnailUrl = cleanImg,
+                title = (if (isVideo) "Reel" else "Post") + " by @$username",
+                caption = caption,
+                authorUsername = username,
+                authorAvatarUrl = avatarUrl
+            )
+
+            if (isVideo) reels.add(item) else posts.add(item)
+        }
+
+        return Pair(reels, posts)
+    }
+
+    /**
+     * Tier 2 Public Mirror layer (Greatfon / Dumpor / Picuki / Imginn / Pixwox / StoriesIG / AnonyIG)
      */
     private fun fetchProfileFromMirror(username: String): ProfileData? {
-        val picuki = runCatching { fetchFromPicuki(username) }.getOrNull()
-        if (picuki != null && (picuki.posts.isNotEmpty() || picuki.reels.isNotEmpty() || picuki.bio.isNotEmpty())) {
-            return picuki
+        Log.d(TAG, "Trying mirror 1: Greatfon")
+        val greatfon = runCatching { fetchFromGreatfon(username) }
+        greatfon.getOrNull()?.let {
+            if (it.posts.isNotEmpty() || it.reels.isNotEmpty()) return it
         }
 
-        val imginn = runCatching { fetchFromImginn(username) }.getOrNull()
-        if (imginn != null && (imginn.posts.isNotEmpty() || imginn.reels.isNotEmpty() || imginn.bio.isNotEmpty())) {
-            return imginn
+        Log.d(TAG, "Trying mirror 2: Dumpor")
+        val dumpor = runCatching { fetchFromDumpor(username) }
+        dumpor.getOrNull()?.let {
+            if (it.posts.isNotEmpty() || it.reels.isNotEmpty()) return it
         }
 
-        val pixwox = runCatching { fetchFromPixwox(username) }.getOrNull()
-        if (pixwox != null && (pixwox.posts.isNotEmpty() || pixwox.reels.isNotEmpty() || pixwox.bio.isNotEmpty())) {
-            return pixwox
+        Log.d(TAG, "Trying mirror 3: Picuki")
+        val picuki = runCatching { fetchFromPicuki(username) }
+        picuki.getOrNull()?.let {
+            if (it.posts.isNotEmpty() || it.reels.isNotEmpty()) return it
         }
 
-        return null
+        Log.d(TAG, "Trying mirror 4: Imginn")
+        val imginn = runCatching { fetchFromImginn(username) }
+        imginn.getOrNull()?.let {
+            if (it.posts.isNotEmpty() || it.reels.isNotEmpty()) return it
+        }
+
+        Log.d(TAG, "Trying mirror 5: Pixwox")
+        val pixwox = runCatching { fetchFromPixwox(username) }
+        pixwox.getOrNull()?.let {
+            if (it.posts.isNotEmpty() || it.reels.isNotEmpty()) return it
+        }
+
+        Log.d(TAG, "Trying mirror 6: StoriesIG")
+        val stories = runCatching { fetchFromStoriesIG(username) }
+        stories.getOrNull()?.let {
+            if (it.posts.isNotEmpty() || it.reels.isNotEmpty()) return it
+        }
+
+        Log.d(TAG, "Trying mirror 7: AnonyIG")
+        val anony = runCatching { fetchFromAnonyIG(username) }
+        anony.getOrNull()?.let {
+            if (it.posts.isNotEmpty() || it.reels.isNotEmpty()) return it
+        }
+
+        return greatfon.getOrNull() ?: dumpor.getOrNull() ?: picuki.getOrNull() ?: imginn.getOrNull() ?: pixwox.getOrNull() ?: stories.getOrNull() ?: anony.getOrNull()
+    }
+
+    private fun fetchFromGreatfon(username: String): ProfileData? {
+        val url = "https://greatfon.io/v/$username"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Referer", "https://greatfon.io/")
+            .build()
+        val response = InstagramHttpClient.client.newCall(request).execute()
+        Log.d(TAG, "Greatfon response: ${response.code}")
+        if (!response.isSuccessful) return null
+        val html = response.body?.string() ?: return null
+        val doc = Jsoup.parse(html)
+
+        val avatar = doc.selectFirst(".user-avatar img, .avatar img, img.avatar")?.attr("src") ?: ""
+        val fullName = doc.selectFirst(".user__title h1, h1")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".user__info-desc, .bio")?.text()?.trim() ?: ""
+
+        val (reels, posts) = extractMediaFromDoc(doc, username, cleanUrl(avatar), "gf")
+        Log.d(TAG, "Greatfon universal extracted: posts=${posts.size}, reels=${reels.size}")
+        if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty()) return null
+
+        return ProfileData(
+            username = username,
+            fullName = fullName.ifEmpty { username },
+            bio = bio,
+            hdAvatarUrl = cleanUrl(avatar),
+            isPrivate = false,
+            isVerified = false,
+            postsCount = reels.size + posts.size,
+            followersCount = "",
+            followingCount = "",
+            externalUrl = "",
+            reels = reels,
+            posts = posts
+        )
+    }
+
+    private fun fetchFromDumpor(username: String): ProfileData? {
+        val url = "https://dumpor.io/v/$username"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Referer", "https://dumpor.io/")
+            .build()
+        val response = InstagramHttpClient.client.newCall(request).execute()
+        Log.d(TAG, "Dumpor response: ${response.code}")
+        if (!response.isSuccessful) return null
+        val html = response.body?.string() ?: return null
+        val doc = Jsoup.parse(html)
+
+        val avatar = doc.selectFirst(".user-avatar img, .avatar img")?.attr("src") ?: ""
+        val fullName = doc.selectFirst(".user__title h1, h1")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".user__info-desc")?.text()?.trim() ?: ""
+
+        val (reels, posts) = extractMediaFromDoc(doc, username, cleanUrl(avatar), "dumpor")
+        Log.d(TAG, "Dumpor universal extracted: posts=${posts.size}, reels=${reels.size}")
+        if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty()) return null
+
+        return ProfileData(
+            username = username,
+            fullName = fullName.ifEmpty { username },
+            bio = bio,
+            hdAvatarUrl = cleanUrl(avatar),
+            isPrivate = false,
+            isVerified = false,
+            postsCount = reels.size + posts.size,
+            followersCount = "",
+            followingCount = "",
+            externalUrl = "",
+            reels = reels,
+            posts = posts
+        )
     }
 
     private fun fetchFromPicuki(username: String): ProfileData? {
@@ -327,9 +537,11 @@ object ProfileScraper {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header("Referer", "https://www.picuki.com/")
             .build()
         val response = InstagramHttpClient.client.newCall(request).execute()
+        Log.d(TAG, "Picuki response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
         val doc = Jsoup.parse(html)
@@ -339,6 +551,8 @@ object ProfileScraper {
         val fullName = doc.selectFirst(".profile-name-bottom")?.text()?.trim() ?: username
         val bio = doc.selectFirst(".profile-description")?.text()?.trim() ?: ""
         val isVerified = doc.selectFirst(".verified-icon") != null || doc.selectFirst("i.fa-check-circle") != null
+
+        val (reels, posts) = extractMediaFromDoc(doc, username, cleanUrl(avatar), "picuki")
 
         val stats = doc.select(".profile-statistics span")
         var followers = ""
@@ -353,37 +567,6 @@ object ProfileScraper {
             } else if (text.contains("Posts", ignoreCase = true)) {
                 postsCount = text.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 0
             }
-        }
-
-        val posts = mutableListOf<MediaItem>()
-        val reels = mutableListOf<MediaItem>()
-
-        val boxes = doc.select(".box-photos .box-photo, .content-items .content-item, .box-photo")
-        val shortcodePattern = Pattern.compile("(?:media|p)/([A-Za-z0-9_-]+)")
-        for (box in boxes) {
-            val link = box.selectFirst("a[href]")?.attr("href") ?: ""
-            val matcher = shortcodePattern.matcher(link)
-            val code = if (matcher.find()) matcher.group(1) else ""
-            if (code.isNullOrEmpty()) continue
-
-            val img = box.selectFirst("img[src]")?.attr("src")
-                ?: box.selectFirst("img[data-src]")?.attr("data-src") ?: ""
-            val isVideo = box.selectFirst(".video-icon") != null || box.selectFirst("video") != null
-            val caption = box.selectFirst(".content-title")?.text()?.trim() ?: ""
-
-            val item = MediaItem(
-                id = code,
-                shortcode = code,
-                type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/$code/",
-                downloadUrl = cleanUrl(img),
-                thumbnailUrl = cleanUrl(img),
-                title = (if (isVideo) "Reel" else "Post") + " by @$username",
-                caption = caption,
-                authorUsername = username,
-                authorAvatarUrl = avatar
-            )
-            if (isVideo) reels.add(item) else posts.add(item)
         }
 
         return ProfileData(
@@ -407,48 +590,20 @@ object ProfileScraper {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header("Referer", "https://imginn.com/")
             .build()
         val response = InstagramHttpClient.client.newCall(request).execute()
+        Log.d(TAG, "Imginn response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
         val doc = Jsoup.parse(html)
 
         val avatar = doc.selectFirst(".avatar img")?.attr("src") ?: ""
-        val fullName = doc.selectFirst(".username")?.text()?.trim() ?: username
-        val bio = doc.selectFirst(".desc")?.text()?.trim() ?: ""
+        val fullName = doc.selectFirst(".username, h1, .name")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".desc, .bio")?.text()?.trim() ?: ""
 
-        val posts = mutableListOf<MediaItem>()
-        val reels = mutableListOf<MediaItem>()
-
-        val items = doc.select(".items .item, .item, .box-photo, .content-item, div.item, a[href*='/p/'], a[href*='/reel/']")
-        val shortcodePattern = Pattern.compile("/(?:p|reel|post)/([A-Za-z0-9_-]+)")
-        for (itemElem in items) {
-            val link = itemElem.selectFirst("a[href]")?.attr("href") ?: itemElem.attr("href") ?: ""
-            val matcher = shortcodePattern.matcher(link)
-            val code = if (matcher.find()) matcher.group(1) else ""
-            if (code.isNullOrEmpty()) continue
-
-            val img = itemElem.selectFirst("img[src]")?.attr("src")
-                ?: itemElem.selectFirst("img[data-src]")?.attr("data-src")
-                ?: itemElem.selectFirst("img")?.attr("data-original")
-                ?: itemElem.attr("data-src") ?: ""
-            val isVideo = itemElem.selectFirst(".icon-video, .video-icon, video, [data-type='video']") != null
-
-            val mediaItem = MediaItem(
-                id = code,
-                shortcode = code,
-                type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/$code/",
-                downloadUrl = cleanUrl(img),
-                thumbnailUrl = cleanUrl(img),
-                title = (if (isVideo) "Reel" else "Post") + " by @$username",
-                caption = "",
-                authorUsername = username,
-                authorAvatarUrl = cleanUrl(avatar)
-            )
-            if (isVideo) reels.add(mediaItem) else posts.add(mediaItem)
-        }
+        val (reels, posts) = extractMediaFromDoc(doc, username, cleanUrl(avatar), "imginn")
 
         val stats = doc.select(".info span, .stats span, .count span, .num")
         var followers = ""
@@ -488,9 +643,11 @@ object ProfileScraper {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header("Referer", "https://www.pixwox.com/")
             .build()
         val response = InstagramHttpClient.client.newCall(request).execute()
+        Log.d(TAG, "Pixwox response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
         val doc = Jsoup.parse(html)
@@ -501,6 +658,8 @@ object ProfileScraper {
             ?: doc.selectFirst("h1")?.text()?.trim() ?: username
         val bio = doc.selectFirst(".desc")?.text()?.trim() ?: ""
 
+        val (reels, posts) = extractMediaFromDoc(doc, username, cleanUrl(avatar), "pixwox")
+
         val stats = doc.select(".sum_num")
         var postsCount = 0
         var followers = ""
@@ -509,36 +668,6 @@ object ProfileScraper {
             postsCount = stats[0].text().replace(Regex("[^0-9]"), "").toIntOrNull() ?: 0
             followers = stats[1].text().trim()
             following = stats[2].text().trim()
-        }
-
-        val posts = mutableListOf<MediaItem>()
-        val reels = mutableListOf<MediaItem>()
-
-        val items = doc.select(".item_box, .item, .post-item")
-        val shortcodePattern = Pattern.compile("/(?:p|reel|post)/([A-Za-z0-9_-]+)")
-        for (itemElem in items) {
-            val link = itemElem.selectFirst("a[href]")?.attr("href") ?: ""
-            val matcher = shortcodePattern.matcher(link)
-            val code = if (matcher.find()) matcher.group(1) else ""
-            if (code.isNullOrEmpty()) continue
-
-            val img = itemElem.selectFirst("img[src]")?.attr("src")
-                ?: itemElem.selectFirst("img[data-src]")?.attr("data-src") ?: ""
-            val isVideo = itemElem.selectFirst(".icon_video, .video, .play") != null
-
-            val mediaItem = MediaItem(
-                id = code,
-                shortcode = code,
-                type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
-                url = "https://www.instagram.com/p/$code/",
-                downloadUrl = cleanUrl(img),
-                thumbnailUrl = cleanUrl(img),
-                title = (if (isVideo) "Reel" else "Post") + " by @$username",
-                caption = itemElem.selectFirst(".desc, .title")?.text()?.trim() ?: "",
-                authorUsername = username,
-                authorAvatarUrl = cleanUrl(avatar)
-            )
-            if (isVideo) reels.add(mediaItem) else posts.add(mediaItem)
         }
 
         if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty() && followers.isEmpty()) return null
@@ -559,12 +688,94 @@ object ProfileScraper {
         )
     }
 
+    private fun fetchFromStoriesIG(username: String): ProfileData? {
+        val url = "https://storiesig.info/en/$username/"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Referer", "https://storiesig.info/")
+            .build()
+        val response = InstagramHttpClient.client.newCall(request).execute()
+        Log.d(TAG, "StoriesIG response: ${response.code}")
+        if (!response.isSuccessful) return null
+        val html = response.body?.string() ?: return null
+        val doc = Jsoup.parse(html)
+
+        val avatar = doc.selectFirst(".profile__avatar img, .avatar img, img.avatar")?.attr("src") ?: ""
+        val fullName = doc.selectFirst(".profile__name, h1")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".profile__biography, .bio")?.text()?.trim() ?: ""
+
+        val (reels, posts) = extractMediaFromDoc(doc, username, cleanUrl(avatar), "stories")
+        if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty()) return null
+
+        return ProfileData(
+            username = username,
+            fullName = fullName.ifEmpty { username },
+            bio = bio,
+            hdAvatarUrl = cleanUrl(avatar),
+            isPrivate = false,
+            isVerified = false,
+            postsCount = reels.size + posts.size,
+            followersCount = "",
+            followingCount = "",
+            externalUrl = "",
+            reels = reels,
+            posts = posts
+        )
+    }
+
+    private fun fetchFromAnonyIG(username: String): ProfileData? {
+        val url = "https://anonyig.com/en/profile/$username/"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Referer", "https://anonyig.com/")
+            .build()
+        val response = InstagramHttpClient.client.newCall(request).execute()
+        Log.d(TAG, "AnonyIG response: ${response.code}")
+        if (!response.isSuccessful) return null
+        val html = response.body?.string() ?: return null
+        val doc = Jsoup.parse(html)
+
+        val avatar = doc.selectFirst(".profile__avatar img, img.avatar")?.attr("src") ?: ""
+        val fullName = doc.selectFirst(".profile__name, h1")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".profile__biography")?.text()?.trim() ?: ""
+
+        val (reels, posts) = extractMediaFromDoc(doc, username, cleanUrl(avatar), "anony")
+        if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty()) return null
+
+        return ProfileData(
+            username = username,
+            fullName = fullName.ifEmpty { username },
+            bio = bio,
+            hdAvatarUrl = cleanUrl(avatar),
+            isPrivate = false,
+            isVerified = false,
+            postsCount = reels.size + posts.size,
+            followersCount = "",
+            followingCount = "",
+            externalUrl = "",
+            reels = reels,
+            posts = posts
+        )
+    }
+
     /**
      * Deep HTML parser that extracts stats and embedded media from HTML & Meta-tags
      */
     private fun fetchProfileFromHtmlWithScraping(username: String): ProfileData? {
         val pageUrl = "https://www.instagram.com/$username/"
-        val requestBuilder = Request.Builder().url(pageUrl)
+        val requestBuilder = Request.Builder()
+            .url(pageUrl)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "none")
+            .header("Sec-Fetch-User", "?1")
+            .header("Upgrade-Insecure-Requests", "1")
 
         try {
             val cm = CookieManager.getInstance()
@@ -577,6 +788,7 @@ object ProfileScraper {
         }
 
         val response = InstagramHttpClient.client.newCall(requestBuilder.build()).execute()
+        Log.d(TAG, "Instagram HTML response: ${response.code}")
         if (!response.isSuccessful) return null
         val html = response.body?.string() ?: return null
 
@@ -585,12 +797,9 @@ object ProfileScraper {
         val ogDesc = doc.selectFirst("meta[property=og:description]")?.attr("content") ?: ""
         val ogImage = doc.selectFirst("meta[property=og:image]")?.attr("content") ?: ""
 
-        // Extract accurate follower, following, and post counts from og:description
-        // e.g., "271M Followers, 279 Following, 1,058 Posts - See Instagram photos and videos..."
         var followersFormatted = ""
         var followingFormatted = ""
         var postsCount = 0
-        var cleanBio = ""
 
         // Normalize non-breaking spaces (\u00A0), narrow NBSP (\u202F) & HTML entities
         val normalizedDesc = ogDesc
@@ -614,10 +823,10 @@ object ProfileScraper {
             if (pstM.find()) postsCount = pstM.group(1)?.replace(",", "")?.toIntOrNull() ?: 0
         }
 
-        // Extract real bio from title or description
-        cleanBio = if (normalizedDesc.contains("photos and videos from")) {
-            val afterBrackets = normalizedDesc.substringAfter("):", "")
-            if (afterBrackets.isNotEmpty()) afterBrackets.trim() else normalizedDesc
+        // Clean custom bio text without metadata repetition
+        val cleanBio = if (normalizedDesc.contains("photos and videos from")) {
+            val afterBrackets = normalizedDesc.substringAfter("):", "").trim()
+            if (afterBrackets.isNotEmpty()) afterBrackets else ""
         } else {
             normalizedDesc
         }
@@ -631,36 +840,48 @@ object ProfileScraper {
         val reelsMap = LinkedHashMap<String, MediaItem>()
         val postsMap = LinkedHashMap<String, MediaItem>()
 
-        // Scan script tags for shortcodes & media items atomically within the same JSON block
-        val mediaBlockPattern = Pattern.compile("\"shortcode\":\\s*\"([A-Za-z0-9_-]+)\"[^\\n\\r]{1,1000}?\"display_url\":\\s*\"(https:[^\"\\\\]+)\"")
-
+        // Scan script tags for shortcodes & media items atomically within JSON window
         val scripts = doc.select("script")
+        val shortcodeRegex = Pattern.compile("\"(?:shortcode|code)\"\\s*:\\s*\"([A-Za-z0-9_-]{8,15})\"")
+        val displayUrlRegex = Pattern.compile("\"(?:display_url|thumbnail_src)\"\\s*:\\s*\"(https:[^\"\\\\]+)\"")
+        val videoUrlRegex = Pattern.compile("\"video_url\"\\s*:\\s*\"(https:[^\"\\\\]+)\"")
+
         for (script in scripts) {
             val content = script.html()
-            if (content.contains("\"shortcode\":") && content.contains("\"display_url\":")) {
-                val blockMatcher = mediaBlockPattern.matcher(content)
-                while (blockMatcher.find()) {
-                    val code = blockMatcher.group(1) ?: continue
-                    if (reelsMap.containsKey(code) || postsMap.containsKey(code)) continue
+            if (!content.contains("\"shortcode\":") && !content.contains("\"code\":")) continue
 
-                    val matchedBlock = blockMatcher.group(0) ?: ""
-                    val isVid = matchedBlock.contains("\"is_video\":true") || matchedBlock.contains("\"is_video\": true")
-                    val rawUrl = blockMatcher.group(2) ?: ""
-                    val dispUrl = cleanUrl(rawUrl.replace("\\u0026", "&"))
+            val matcher = shortcodeRegex.matcher(content)
+            while (matcher.find()) {
+                val code = matcher.group(1) ?: continue
+                if (reelsMap.containsKey(code) || postsMap.containsKey(code)) continue
 
+                // Find local window of 2500 chars around this match
+                val start = maxOf(0, matcher.start() - 1500)
+                val end = minOf(content.length, matcher.end() + 1500)
+                val window = content.substring(start, end)
+
+                val isVid = window.contains("\"is_video\":true") || window.contains("\"is_video\": true")
+                val dispMatch = displayUrlRegex.matcher(window)
+                val rawDisplayUrl = if (dispMatch.find()) dispMatch.group(1) else ""
+                val vidMatch = videoUrlRegex.matcher(window)
+                val rawVideoUrl = if (vidMatch.find()) vidMatch.group(1) else ""
+
+                val effectiveImg = cleanUrl(rawDisplayUrl.replace("\\u0026", "&"))
+                val effectiveVid = cleanUrl(rawVideoUrl.replace("\\u0026", "&"))
+
+                if (effectiveImg.isNotEmpty() || effectiveVid.isNotEmpty()) {
                     val item = MediaItem(
                         id = code,
                         shortcode = code,
                         type = if (isVid) MediaType.REEL else MediaType.POST_IMAGE,
                         url = "https://www.instagram.com/p/$code/",
-                        downloadUrl = dispUrl,
-                        thumbnailUrl = dispUrl,
+                        downloadUrl = if (isVid && effectiveVid.isNotEmpty()) effectiveVid else effectiveImg,
+                        thumbnailUrl = effectiveImg.ifEmpty { effectiveVid },
                         title = (if (isVid) "Reel" else "Post") + " by @$username",
                         caption = "",
                         authorUsername = username,
                         authorAvatarUrl = ogImage
                     )
-
                     if (isVid) reelsMap[code] = item else postsMap[code] = item
                 }
             }

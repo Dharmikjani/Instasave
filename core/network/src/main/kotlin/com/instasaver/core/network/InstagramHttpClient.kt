@@ -32,24 +32,10 @@ object InstagramHttpClient {
     }
 
     /**
-     * Initializes anonymous guest session cookies so that public Instagram Web endpoints
-     * (like web_profile_info and embed) accept unauthenticated requests without throwing 401.
+     * Prepares guest session if needed without injecting invalid/forged tokens.
      */
     fun ensureGuestCookies() {
-        try {
-            val cm = CookieManager.getInstance()
-            val existing = cm.getCookie("https://www.instagram.com")
-            if (existing.isNullOrBlank() || !existing.contains("csrftoken=")) {
-                val guestCsrf = UUID.randomUUID().toString().replace("-", "")
-                val guestMid = "Z" + UUID.randomUUID().toString().replace("-", "").take(25)
-                val guestDid = UUID.randomUUID().toString()
-                cm.setCookie("https://www.instagram.com", "csrftoken=$guestCsrf; Domain=.instagram.com; Path=/; Secure")
-                cm.setCookie("https://www.instagram.com", "mid=$guestMid; Domain=.instagram.com; Path=/; Secure")
-                cm.setCookie("https://www.instagram.com", "ig_did=$guestDid; Domain=.instagram.com; Path=/; Secure")
-                cm.flush()
-            }
-        } catch (e: Exception) {
-            // ignore in tests
-        }
+        // Intentionally no-op: Instagram server-side HMAC validation rejects synthetic UUID cookies.
+        // Public endpoints function better with no cookies or cookies issued by Instagram edge servers.
     }
 }

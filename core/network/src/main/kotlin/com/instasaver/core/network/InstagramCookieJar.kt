@@ -32,33 +32,36 @@ class InstagramCookieJar @Inject constructor() : CookieJar {
             }
         }
 
-        // 2. Read directly from Android WebView CookieManager (Single Source of Truth)
-        try {
-            val cookieManager = CookieManager.getInstance()
-            val cookieHeader = cookieManager.getCookie(url.toString())
-                ?: cookieManager.getCookie("https://www.instagram.com")
-                ?: cookieManager.getCookie("https://instagram.com")
+        // 2. Read directly from Android WebView CookieManager (Single Source of Truth) ONLY for Instagram domains
+        val isInstagram = host == "instagram.com" || host.endsWith(".instagram.com")
+        if (isInstagram) {
+            try {
+                val cookieManager = CookieManager.getInstance()
+                val cookieHeader = cookieManager.getCookie(url.toString())
+                    ?: cookieManager.getCookie("https://www.instagram.com")
+                    ?: cookieManager.getCookie("https://instagram.com")
 
-            if (!cookieHeader.isNullOrBlank()) {
-                val pairs = cookieHeader.split(";")
-                for (pair in pairs) {
-                    val parts = pair.trim().split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val c = Cookie.Builder()
-                            .name(parts[0].trim())
-                            .value(parts[1].trim())
-                            .domain(url.host)
-                            .path("/")
-                            .build()
-                        // Avoid duplicates by name
-                        if (list.none { it.name == c.name }) {
-                            list.add(c)
+                if (!cookieHeader.isNullOrBlank()) {
+                    val pairs = cookieHeader.split(";")
+                    for (pair in pairs) {
+                        val parts = pair.trim().split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val c = Cookie.Builder()
+                                .name(parts[0].trim())
+                                .value(parts[1].trim())
+                                .domain(url.host)
+                                .path("/")
+                                .build()
+                            // Avoid duplicates by name
+                            if (list.none { it.name == c.name }) {
+                                list.add(c)
+                            }
                         }
                     }
                 }
+            } catch (e: Exception) {
+                // Ignore in non-Android/unit test environments
             }
-        } catch (e: Exception) {
-            // Ignore in non-Android/unit test environments
         }
 
         return list

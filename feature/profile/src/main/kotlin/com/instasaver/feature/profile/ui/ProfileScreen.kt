@@ -125,6 +125,16 @@ fun ProfileExplorerScreen(
     val isPinned = (uiState as? ProfileUiState.Success)?.isPinned ?: false
     val errorMessage = (uiState as? ProfileUiState.Error)?.message
 
+    LaunchedEffect(profileData) {
+        if (profileData != null) {
+            if (profileData.posts.isEmpty() && profileData.reels.isNotEmpty()) {
+                selectedTab = 1
+            } else if (profileData.posts.isNotEmpty()) {
+                selectedTab = 0
+            }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(AmoledBlack)) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Search Bar

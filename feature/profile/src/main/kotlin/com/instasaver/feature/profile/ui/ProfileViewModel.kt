@@ -3,7 +3,9 @@ package com.instasaver.feature.profile.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.instasaver.core.database.DatabaseRepository
+import com.instasaver.core.extractor.ExtractorRepository
 import com.instasaver.core.extractor.ProfileRepository
+import com.instasaver.core.model.MediaType
 import com.instasaver.core.model.MediaItem
 import com.instasaver.core.model.ProfileData
 import com.instasaver.core.storage.MediaStorageService
@@ -26,11 +28,13 @@ sealed interface ProfileUiIntent {
     data class TogglePin(val username: String) : ProfileUiIntent
     data class DownloadItem(val item: MediaItem) : ProfileUiIntent
     data class DownloadBatch(val items: List<MediaItem>) : ProfileUiIntent
+    data class DownloadAudio(val item: MediaItem) : ProfileUiIntent
 }
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
+    private val extractorRepository: ExtractorRepository,
     private val databaseRepository: DatabaseRepository,
     private val storageService: MediaStorageService
 ) : ViewModel() {
@@ -44,6 +48,7 @@ class ProfileViewModel @Inject constructor(
             is ProfileUiIntent.TogglePin -> togglePin(intent.username)
             is ProfileUiIntent.DownloadItem -> downloadItem(intent.item)
             is ProfileUiIntent.DownloadBatch -> downloadBatch(intent.items)
+            is ProfileUiIntent.DownloadAudio -> downloadAudio(intent.item)
         }
     }
 
@@ -82,18 +87,48 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
+    private fun resolveMediaUrl(item: MediaItem): suspend () -> MediaItem = {
+        if (item.type == MediaType.REEL && (item.downloadUrl.endsWith(".jpg") || item.downloadUrl.endsWith(".jpeg") || item.downloadUrl == item.thumbnailUrl)) {
+            val fresh = extractorRepository.extractMedia(item.url)
+            if (fresh.isSuccess) fresh.getOrThrow() else item
+        } else {
+            item
+        }
+    }
+
     private fun downloadItem(item: MediaItem) {
         viewModelScope.launch {
+            val targetItem = resolveMediaUrl(item)()
             val result = storageService.saveMediaToGallery(
-                downloadUrl = item.downloadUrl,
-                authorUsername = item.authorUsername,
-                shortcode = item.shortcode,
-                mediaType = item.type
+                downloadUrl = targetItem.downloadUrl,
+                authorUsername = targetItem.authorUsername,
+                shortcode = targetItem.shortcode,
+                mediaType = targetItem.type
             )
             result.onSuccess { uri ->
                 databaseRepository.recordDownload(
-                    shortcode = item.shortcode,
-                    fileName = item.title.ifBlank { "Media by @${item.authorUsername}" },
+                    shortcode = targetItem.shortcode,
+                    fileName = targetItem.title.ifBlank { "Media by @${targetItem.authorUsername}" },
+                    savedUri = uri.toString()
+                )
+            }
+        }
+    }
+
+    private fun downloadAudio(item: MediaItem) {
+        viewModelScope.launch {
+            val targetItem = resolveMediaUrl(item)()
+            val audioUrl = targetItem.audioTrack?.audioUrl ?: targetItem.downloadUrl
+            val result = storageService.saveMediaToGallery(
+                downloadUrl = audioUrl,
+                authorUsername = targetItem.authorUsername,
+                shortcode = targetItem.shortcode,
+                mediaType = MediaType.AUDIO
+            )
+            result.onSuccess { uri ->
+                databaseRepository.recordDownload(
+                    shortcode = targetItem.shortcode,
+                    fileName = "Audio - @${targetItem.authorUsername}",
                     savedUri = uri.toString()
                 )
             }
@@ -103,16 +138,17 @@ class ProfileViewModel @Inject constructor(
     private fun downloadBatch(items: List<MediaItem>) {
         viewModelScope.launch {
             for (item in items) {
+                val targetItem = resolveMediaUrl(item)()
                 val result = storageService.saveMediaToGallery(
-                    downloadUrl = item.downloadUrl,
-                    authorUsername = item.authorUsername,
-                    shortcode = item.shortcode,
-                    mediaType = item.type
+                    downloadUrl = targetItem.downloadUrl,
+                    authorUsername = targetItem.authorUsername,
+                    shortcode = targetItem.shortcode,
+                    mediaType = targetItem.type
                 )
                 result.onSuccess { uri ->
                     databaseRepository.recordDownload(
-                        shortcode = item.shortcode,
-                        fileName = item.title.ifBlank { "Media by @${item.authorUsername}" },
+                        shortcode = targetItem.shortcode,
+                        fileName = targetItem.title.ifBlank { "Media by @${targetItem.authorUsername}" },
                         savedUri = uri.toString()
                     )
                 }

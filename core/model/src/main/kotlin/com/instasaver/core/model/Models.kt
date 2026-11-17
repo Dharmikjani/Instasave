@@ -84,6 +84,7 @@ data class LocalSavedItem(
     val title: String,
     val uri: Uri,
     val isVideo: Boolean,
+    val isAudio: Boolean = false,
     val creatorName: String,
     val sizeBytes: Long,
     val dateAdded: Long

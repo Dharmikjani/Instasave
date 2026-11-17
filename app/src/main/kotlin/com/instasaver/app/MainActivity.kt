@@ -240,7 +240,10 @@ fun AppRootContainer(
                         selectedTab = 1
                     }
                 )
-                1 -> ProfileExplorerScreen(initialUsername = explorerTargetUsername)
+                1 -> ProfileExplorerScreen(
+                    initialUsername = explorerTargetUsername,
+                    onUsernameConsumed = { explorerTargetUsername = null }
+                )
                 2 -> WatchlistScreen(onCreatorClick = { username ->
                     explorerTargetUsername = username
                     selectedTab = 1

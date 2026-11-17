@@ -11,6 +11,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.instasaver.core.database.DatabaseRepository
 import com.instasaver.core.model.MediaType
 import com.instasaver.core.storage.MediaStorageService
 import dagger.assisted.Assisted
@@ -20,12 +21,14 @@ import dagger.assisted.AssistedInject
 class DownloadWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val storageService: MediaStorageService
+    private val storageService: MediaStorageService,
+    private val databaseRepository: DatabaseRepository
 ) : CoroutineWorker(appContext, workerParams) {
+
+    private val workerNotificationId: Int = (id.hashCode() and 0x7FFFFFFF) % 100000 + 1000
 
     companion object {
         const val CHANNEL_ID = "instasaver_download_channel"
-        const val NOTIFICATION_ID = 1001
         const val KEY_DOWNLOAD_URL = "download_url"
         const val KEY_AUTHOR = "author"
         const val KEY_SHORTCODE = "shortcode"
@@ -60,9 +63,9 @@ class DownloadWorker @AssistedInject constructor(
             .build()
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            ForegroundInfo(workerNotificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
+            ForegroundInfo(workerNotificationId, notification)
         }
     }
 
@@ -106,15 +109,22 @@ class DownloadWorker @AssistedInject constructor(
                     .setOngoing(true)
                     .setProgress(100, progressInt.coerceIn(0, 100), false)
                     .build()
-                notificationManager.notify(NOTIFICATION_ID, updateNotif)
+                notificationManager.notify(workerNotificationId, updateNotif)
             } catch (_: Exception) {}
         }
 
         return if (saveResult.isSuccess) {
             val uri = saveResult.getOrNull()
+            if (uri != null) {
+                databaseRepository.recordDownload(
+                    shortcode = shortcode,
+                    fileName = "Media by @$author",
+                    savedUri = uri.toString()
+                )
+            }
             try {
                 val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(NOTIFICATION_ID)
+                notificationManager.cancel(workerNotificationId)
             } catch (_: Exception) {}
             Result.success(workDataOf(KEY_URI to (uri?.toString() ?: "")))
         } else {

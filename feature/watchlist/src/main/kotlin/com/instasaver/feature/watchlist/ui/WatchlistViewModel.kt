@@ -35,14 +35,14 @@ class WatchlistViewModel @Inject constructor(
     }
 
     private fun removeCreator(username: String) {
-        val clean = username.trim().removePrefix("@")
+        val clean = username.trim().removePrefix("@").lowercase()
         viewModelScope.launch {
             databaseRepository.unpinCreator(clean)
         }
     }
 
     private fun toggleCreator(username: String) {
-        val clean = username.trim().removePrefix("@")
+        val clean = username.trim().removePrefix("@").lowercase()
         viewModelScope.launch {
             if (databaseRepository.isPinned(clean)) {
                 databaseRepository.unpinCreator(clean)

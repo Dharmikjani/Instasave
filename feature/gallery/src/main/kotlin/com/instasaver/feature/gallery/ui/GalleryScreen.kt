@@ -23,8 +23,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -94,7 +96,8 @@ fun GalleryScreen(
         when (selectedFilter) {
             "All" -> items
             "Videos" -> items.filter { it.isVideo }
-            "Photos" -> items.filter { !it.isVideo }
+            "Photos" -> items.filter { !it.isVideo && !it.isAudio }
+            "Audio" -> items.filter { it.isAudio }
             else -> items.filter { it.creatorName.equals(selectedFilter, ignoreCase = true) }
         }
     }
@@ -126,6 +129,9 @@ fun GalleryScreen(
                 }
                 item {
                     GalleryChip(name = "Photos", isSelected = selectedFilter == "Photos") { selectedFilter = "Photos" }
+                }
+                item {
+                    GalleryChip(name = "Audio", isSelected = selectedFilter == "Audio") { selectedFilter = "Audio" }
                 }
                 items(creators) { creator ->
                     GalleryChip(name = "@$creator", isSelected = selectedFilter == creator) { selectedFilter = creator }
@@ -164,7 +170,7 @@ fun GalleryScreen(
                         GalleryGridItem(
                             item = item,
                             onClick = {
-                                if (item.isVideo) {
+                                if (item.isVideo || item.isAudio) {
                                     playingItem = item
                                 } else {
                                     previewPhotoItem = item
@@ -172,7 +178,11 @@ fun GalleryScreen(
                             },
                             onShare = {
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = if (item.isVideo) "video/*" else "image/*"
+                                    type = when {
+                                        item.isVideo -> "video/*"
+                                        item.isAudio -> "audio/*"
+                                        else -> "image/*"
+                                    }
                                     putExtra(Intent.EXTRA_STREAM, item.uri)
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
@@ -314,12 +324,37 @@ fun GalleryGridItem(
             .background(DarkSurfaceElevated)
             .clickable { onClick() }
     ) {
-        AsyncImage(
-            model = item.uri,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        if (item.isAudio) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1E1424)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.Audiotrack,
+                        contentDescription = "Audio",
+                        tint = IgPink,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "AUDIO (M4A)",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        } else {
+            AsyncImage(
+                model = item.uri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         if (item.isVideo) {
             Icon(

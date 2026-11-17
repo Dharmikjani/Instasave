@@ -106,6 +106,56 @@ class GalleryScanner @Inject constructor(
                             title = name,
                             uri = uri,
                             isVideo = false,
+                            isAudio = false,
+                            creatorName = creator,
+                            sizeBytes = size,
+                            dateAdded = dateAdded
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+
+        // 3. Scan Audio
+        val audioProjection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.SIZE,
+            MediaStore.Audio.Media.DATE_ADDED
+        )
+        val audioSelection = "${MediaStore.Audio.Media.DISPLAY_NAME} LIKE ?"
+        val audioArgs = arrayOf("Insta_%")
+
+        try {
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                audioProjection,
+                audioSelection,
+                audioArgs,
+                "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val name = cursor.getString(nameCol)
+                    val size = cursor.getLong(sizeCol)
+                    val dateAdded = cursor.getLong(dateCol)
+                    val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                    val creator = extractCreator(name)
+
+                    list.add(
+                        LocalSavedItem(
+                            id = id,
+                            title = name,
+                            uri = uri,
+                            isVideo = false,
+                            isAudio = true,
                             creatorName = creator,
                             sizeBytes = size,
                             dateAdded = dateAdded

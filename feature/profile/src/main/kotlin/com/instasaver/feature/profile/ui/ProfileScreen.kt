@@ -1,5 +1,6 @@
 package com.instasaver.feature.profile.ui
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,12 +23,16 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Verified
+import com.instasaver.feature.profile.ui.components.VideoPlayerView
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -92,6 +97,7 @@ import com.instasaver.feature.profile.ui.theme.TextSecondary
 @Composable
 fun ProfileExplorerScreen(
     initialUsername: String? = null,
+    onUsernameConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
@@ -100,6 +106,7 @@ fun ProfileExplorerScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     var showDpZoomDialog by remember { mutableStateOf(false) }
     var showDownloadAllSheet by remember { mutableStateOf(false) }
+    var selectedPreviewMedia by remember { mutableStateOf<MediaItem?>(null) }
 
     val uiState by viewModel.uiState.collectAsState()
 
@@ -107,6 +114,7 @@ fun ProfileExplorerScreen(
         if (!initialUsername.isNullOrBlank()) {
             searchInput = initialUsername
             viewModel.onIntent(ProfileUiIntent.Search(initialUsername))
+            onUsernameConsumed()
         }
     }
 
@@ -359,8 +367,7 @@ fun ProfileExplorerScreen(
                                 modifier = Modifier
                                     .aspectRatio(1f)
                                     .clickable {
-                                        viewModel.onIntent(ProfileUiIntent.DownloadItem(item))
-                                        Toast.makeText(context, "Downloading item...", Toast.LENGTH_SHORT).show()
+                                        selectedPreviewMedia = item
                                     }
                             ) {
                                 AsyncImage(
@@ -382,6 +389,30 @@ fun ProfileExplorerScreen(
                     }
                 }
             }
+        }
+
+        selectedPreviewMedia?.let { media ->
+            ProfileMediaPreviewDialog(
+                media = media,
+                onDismiss = { selectedPreviewMedia = null },
+                onDownload = {
+                    viewModel.onIntent(ProfileUiIntent.DownloadItem(media))
+                    Toast.makeText(context, "Downloading to Gallery...", Toast.LENGTH_SHORT).show()
+                    selectedPreviewMedia = null
+                },
+                onDownloadAudio = {
+                    viewModel.onIntent(ProfileUiIntent.DownloadAudio(media))
+                    Toast.makeText(context, "Extracting Audio (M4A)...", Toast.LENGTH_SHORT).show()
+                    selectedPreviewMedia = null
+                },
+                onShare = {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, media.url)
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "Share Media Link"))
+                }
+            )
         }
 
         if (showDpZoomDialog && profileData != null) {
@@ -512,6 +543,155 @@ fun HdDpDialog(
                     Icon(Icons.Default.Download, contentDescription = null, tint = Color.White)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Save HD Avatar to Gallery", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileMediaPreviewDialog(
+    media: MediaItem,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit,
+    onDownloadAudio: () -> Unit,
+    onShare: () -> Unit
+) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    val isVideo = media.type == MediaType.REEL || media.type == MediaType.POST_VIDEO
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isVideo) "Reel Preview" else "Photo Preview",
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Text("@${media.authorUsername}", color = IgPink, fontSize = 12.sp)
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Clear, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.Black)
+                ) {
+                    if (isVideo) {
+                        VideoPlayerView(
+                            videoUrl = media.downloadUrl,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        AsyncImage(
+                            model = media.downloadUrl.ifEmpty { media.thumbnailUrl },
+                            contentDescription = "Preview",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        scale = (scale * zoom).coerceIn(1f, 5f)
+                                        if (scale > 1f) {
+                                            val maxOffset = (scale - 1f) * 300f
+                                            offsetX = (offsetX + pan.x).coerceIn(-maxOffset, maxOffset)
+                                            offsetY = (offsetY + pan.y).coerceIn(-maxOffset, maxOffset)
+                                        } else {
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                        }
+                                    }
+                                }
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    translationX = offsetX
+                                    translationY = offsetY
+                                }
+                        )
+                    }
+                }
+
+                if (media.caption.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = media.caption,
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Button(
+                    onClick = onDownload,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (isVideo) "Download Video (1080p)" else "Download Photo",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (isVideo) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onDownloadAudio,
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated)
+                        ) {
+                            Icon(Icons.Default.Audiotrack, contentDescription = null, tint = IgPink, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Audio (M4A)", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        Button(
+                            onClick = onShare,
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Share", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
         }

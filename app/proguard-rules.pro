@@ -28,7 +28,7 @@
     @kotlinx.serialization.SerialName *;
 }
 
-# 3. Dagger-Hilt & Assisted Injection
+# 3. Dagger-Hilt & Assisted Injection & WorkManager
 -keep class * extends dagger.hilt.internal.GeneratedComponentManager { *; }
 -keep class dagger.hilt.** { *; }
 -keep class com.google.dagger.** { *; }
@@ -44,9 +44,16 @@
 -keepclassmembers,allowobfuscation class * {
     @dagger.hilt.android.lifecycle.HiltViewModel <init>(...);
 }
--keepclassmembers class * extends androidx.work.ListenableWorker {
-    public <init>(android.content.Context, androidx.work.WorkerParameters);
+-keep class * extends androidx.work.ListenableWorker {
+    <init>(...);
 }
+-keep class androidx.hilt.work.** { *; }
+-keep class * extends androidx.work.WorkerFactory { *; }
+-keep class * implements dagger.assisted.AssistedFactory { *; }
+-keepclasseswithmembers class * {
+    @androidx.hilt.work.HiltWorker <init>(...);
+}
+-keep class com.instasaver.feature.downloader.work.DownloadWorker** { *; }
 
 # 4. Room Database
 -keep class * extends androidx.room.RoomDatabase

@@ -383,11 +383,28 @@ fun ProfileExplorerScreen(
                 val mediaList = if (selectedTab == 0) profile.posts else profile.reels
                 if (mediaList.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = if (profile.isPrivate) "This account is private." else "No media available in this section.",
-                            color = TextSecondary,
-                            fontSize = 13.sp
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = when {
+                                    profile.isPrivate -> "This account is private."
+                                    profile.postsCount == 0 && profile.followersCount.isEmpty() -> "No public media available in Guest Mode."
+                                    else -> "No media available in this section."
+                                },
+                                color = TextPrimary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            if (!profile.isPrivate && profile.postsCount == 0 && profile.followersCount.isEmpty()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Connect Instagram via 'Login (Unlock All)' in the top bar to view protected or private profiles with 100% reliability.",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
                     }
                 } else {
                     LazyVerticalGrid(

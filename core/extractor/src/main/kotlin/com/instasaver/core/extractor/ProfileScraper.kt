@@ -314,6 +314,11 @@ object ProfileScraper {
             return imginn
         }
 
+        val pixwox = runCatching { fetchFromPixwox(username) }.getOrNull()
+        if (pixwox != null && (pixwox.posts.isNotEmpty() || pixwox.reels.isNotEmpty() || pixwox.bio.isNotEmpty())) {
+            return pixwox
+        }
+
         return null
     }
 
@@ -416,17 +421,19 @@ object ProfileScraper {
         val posts = mutableListOf<MediaItem>()
         val reels = mutableListOf<MediaItem>()
 
-        val items = doc.select(".items .item")
-        val shortcodePattern = Pattern.compile("/p/([A-Za-z0-9_-]+)/")
+        val items = doc.select(".items .item, .item, .box-photo, .content-item, div.item, a[href*='/p/'], a[href*='/reel/']")
+        val shortcodePattern = Pattern.compile("/(?:p|reel|post)/([A-Za-z0-9_-]+)")
         for (itemElem in items) {
-            val link = itemElem.selectFirst("a[href]")?.attr("href") ?: ""
+            val link = itemElem.selectFirst("a[href]")?.attr("href") ?: itemElem.attr("href") ?: ""
             val matcher = shortcodePattern.matcher(link)
             val code = if (matcher.find()) matcher.group(1) else ""
             if (code.isNullOrEmpty()) continue
 
             val img = itemElem.selectFirst("img[src]")?.attr("src")
-                ?: itemElem.selectFirst("img[data-src]")?.attr("data-src") ?: ""
-            val isVideo = itemElem.selectFirst(".icon-video") != null
+                ?: itemElem.selectFirst("img[data-src]")?.attr("data-src")
+                ?: itemElem.selectFirst("img")?.attr("data-original")
+                ?: itemElem.attr("data-src") ?: ""
+            val isVideo = itemElem.selectFirst(".icon-video, .video-icon, video, [data-type='video']") != null
 
             val mediaItem = MediaItem(
                 id = code,
@@ -438,9 +445,24 @@ object ProfileScraper {
                 title = (if (isVideo) "Reel" else "Post") + " by @$username",
                 caption = "",
                 authorUsername = username,
-                authorAvatarUrl = avatar
+                authorAvatarUrl = cleanUrl(avatar)
             )
             if (isVideo) reels.add(mediaItem) else posts.add(mediaItem)
+        }
+
+        val stats = doc.select(".info span, .stats span, .count span, .num")
+        var followers = ""
+        var following = ""
+        var postsCount = 0
+        for (span in stats) {
+            val text = span.text()
+            if (text.contains("Follower", ignoreCase = true)) {
+                followers = text.replace(Regex("[^0-9.KMBkmb]"), "")
+            } else if (text.contains("Following", ignoreCase = true)) {
+                following = text.replace(Regex("[^0-9.KMBkmb]"), "")
+            } else if (text.contains("Post", ignoreCase = true)) {
+                postsCount = text.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 0
+            }
         }
 
         if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty()) return null
@@ -452,9 +474,85 @@ object ProfileScraper {
             hdAvatarUrl = cleanUrl(avatar),
             isPrivate = false,
             isVerified = false,
-            postsCount = reels.size + posts.size,
-            followersCount = "",
-            followingCount = "",
+            postsCount = if (postsCount > 0) postsCount else (reels.size + posts.size),
+            followersCount = followers,
+            followingCount = following,
+            externalUrl = "",
+            reels = reels,
+            posts = posts
+        )
+    }
+
+    private fun fetchFromPixwox(username: String): ProfileData? {
+        val url = "https://www.pixwox.com/profile/$username/"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", InstagramHttpClient.USER_AGENT_DESKTOP)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .build()
+        val response = InstagramHttpClient.client.newCall(request).execute()
+        if (!response.isSuccessful) return null
+        val html = response.body?.string() ?: return null
+        val doc = Jsoup.parse(html)
+
+        val avatar = doc.selectFirst(".head .avatar img")?.attr("src")
+            ?: doc.selectFirst(".avatar img")?.attr("src") ?: ""
+        val fullName = doc.selectFirst(".fullname")?.text()?.trim()
+            ?: doc.selectFirst("h1")?.text()?.trim() ?: username
+        val bio = doc.selectFirst(".desc")?.text()?.trim() ?: ""
+
+        val stats = doc.select(".sum_num")
+        var postsCount = 0
+        var followers = ""
+        var following = ""
+        if (stats.size >= 3) {
+            postsCount = stats[0].text().replace(Regex("[^0-9]"), "").toIntOrNull() ?: 0
+            followers = stats[1].text().trim()
+            following = stats[2].text().trim()
+        }
+
+        val posts = mutableListOf<MediaItem>()
+        val reels = mutableListOf<MediaItem>()
+
+        val items = doc.select(".item_box, .item, .post-item")
+        val shortcodePattern = Pattern.compile("/(?:p|reel|post)/([A-Za-z0-9_-]+)")
+        for (itemElem in items) {
+            val link = itemElem.selectFirst("a[href]")?.attr("href") ?: ""
+            val matcher = shortcodePattern.matcher(link)
+            val code = if (matcher.find()) matcher.group(1) else ""
+            if (code.isNullOrEmpty()) continue
+
+            val img = itemElem.selectFirst("img[src]")?.attr("src")
+                ?: itemElem.selectFirst("img[data-src]")?.attr("data-src") ?: ""
+            val isVideo = itemElem.selectFirst(".icon_video, .video, .play") != null
+
+            val mediaItem = MediaItem(
+                id = code,
+                shortcode = code,
+                type = if (isVideo) MediaType.REEL else MediaType.POST_IMAGE,
+                url = "https://www.instagram.com/p/$code/",
+                downloadUrl = cleanUrl(img),
+                thumbnailUrl = cleanUrl(img),
+                title = (if (isVideo) "Reel" else "Post") + " by @$username",
+                caption = itemElem.selectFirst(".desc, .title")?.text()?.trim() ?: "",
+                authorUsername = username,
+                authorAvatarUrl = cleanUrl(avatar)
+            )
+            if (isVideo) reels.add(mediaItem) else posts.add(mediaItem)
+        }
+
+        if (posts.isEmpty() && reels.isEmpty() && bio.isEmpty() && followers.isEmpty()) return null
+
+        return ProfileData(
+            username = username,
+            fullName = fullName.ifEmpty { username },
+            bio = bio,
+            hdAvatarUrl = cleanUrl(avatar),
+            isPrivate = false,
+            isVerified = doc.selectFirst(".verified, i.fa-check") != null,
+            postsCount = if (postsCount > 0) postsCount else (reels.size + posts.size),
+            followersCount = followers,
+            followingCount = following,
             externalUrl = "",
             reels = reels,
             posts = posts
@@ -592,6 +690,12 @@ object ProfileScraper {
         }
     }
 
-    private fun cleanUrl(url: String): String =
-        url.replace("&amp;", "&").replace("\\u0026", "&")
+    private fun cleanUrl(url: String): String {
+        if (url.isBlank()) return ""
+        var cleaned = url.replace("&amp;", "&").replace("\\u0026", "&")
+        if (cleaned.startsWith("//")) {
+            cleaned = "https:$cleaned"
+        }
+        return cleaned
+    }
 }

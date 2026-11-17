@@ -2,15 +2,12 @@ package com.instasaver.feature.watchlist.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.instasaver.core.database.dao.WatchlistDao
-import com.instasaver.core.database.entity.CreatorEntity
+import com.instasaver.core.database.DatabaseRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface WatchlistUiIntent {
@@ -20,10 +17,10 @@ sealed interface WatchlistUiIntent {
 
 @HiltViewModel
 class WatchlistViewModel @Inject constructor(
-    private val watchlistDao: WatchlistDao
+    private val databaseRepository: DatabaseRepository
 ) : ViewModel() {
 
-    val creators: StateFlow<List<String>> = watchlistDao.observePinnedUsernames()
+    val creators: StateFlow<List<String>> = databaseRepository.observePinnedUsernames()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -40,21 +37,17 @@ class WatchlistViewModel @Inject constructor(
     private fun removeCreator(username: String) {
         val clean = username.trim().removePrefix("@")
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                watchlistDao.delete(clean)
-            }
+            databaseRepository.unpinCreator(clean)
         }
     }
 
     private fun toggleCreator(username: String) {
         val clean = username.trim().removePrefix("@")
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                if (watchlistDao.isPinned(clean)) {
-                    watchlistDao.delete(clean)
-                } else {
-                    watchlistDao.insert(CreatorEntity(username = clean))
-                }
+            if (databaseRepository.isPinned(clean)) {
+                databaseRepository.unpinCreator(clean)
+            } else {
+                databaseRepository.pinCreator(clean)
             }
         }
     }

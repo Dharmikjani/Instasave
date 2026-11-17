@@ -52,4 +52,20 @@ object DatabaseModule {
     fun provideDownloadHistoryDao(database: InstaSaverDatabase): DownloadHistoryDao {
         return database.downloadHistoryDao()
     }
+
+    @Provides
+    @Singleton
+    fun provideDatabaseRepository(
+        watchlistDao: WatchlistDao,
+        mediaCacheDao: MediaCacheDao,
+        profileCacheDao: ProfileCacheDao,
+        downloadHistoryDao: DownloadHistoryDao
+    ): com.instasaver.core.database.DatabaseRepository {
+        return com.instasaver.core.database.DatabaseRepositoryImpl(
+            watchlistDao = watchlistDao,
+            mediaCacheDao = mediaCacheDao,
+            profileCacheDao = profileCacheDao,
+            downloadHistoryDao = downloadHistoryDao
+        )
+    }
 }

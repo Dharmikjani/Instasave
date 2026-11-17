@@ -2,8 +2,12 @@ package com.instasaver.feature.downloader.work
 
 import android.content.Context
 import android.net.Uri
-import com.instasaver.core.database.dao.DownloadHistoryDao
-import com.instasaver.core.database.entity.DownloadHistoryEntity
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import com.instasaver.core.database.DatabaseRepository
 import com.instasaver.core.model.DownloadProgress
 import com.instasaver.core.model.MediaItem
 import com.instasaver.core.storage.MediaStorageService
@@ -26,7 +30,7 @@ import javax.inject.Singleton
 class DownloadRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val storageService: MediaStorageService,
-    private val downloadHistoryDao: DownloadHistoryDao
+    private val databaseRepository: DatabaseRepository
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(2)
@@ -85,12 +89,10 @@ class DownloadRepository @Inject constructor(
                             isCompleted = true
                         )
                     )
-                    downloadHistoryDao.insert(
-                        DownloadHistoryEntity(
-                            shortcode = item.shortcode,
-                            fileName = item.title,
-                            savedUri = uri.toString()
-                        )
+                    databaseRepository.recordDownload(
+                        shortcode = item.shortcode,
+                        fileName = item.title.ifBlank { "Media by @${item.authorUsername}" },
+                        savedUri = uri.toString()
                     )
                     withContext(Dispatchers.Main) {
                         onSuccess(uri)
@@ -115,6 +117,28 @@ class DownloadRepository @Inject constructor(
                 semaphore.release()
             }
         }
+    }
+
+    fun enqueueBackgroundDownload(item: MediaItem, customUrl: String? = null) {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val targetUrl = customUrl ?: item.downloadUrl
+        val workRequest = OneTimeWorkRequestBuilder<DownloadWorker>()
+            .setConstraints(constraints)
+            .setInputData(
+                workDataOf(
+                    DownloadWorker.KEY_DOWNLOAD_URL to targetUrl,
+                    DownloadWorker.KEY_AUTHOR to item.authorUsername,
+                    DownloadWorker.KEY_SHORTCODE to item.shortcode,
+                    DownloadWorker.KEY_MEDIA_TYPE to item.type.name
+                )
+            )
+            .addTag("download_${item.shortcode}")
+            .build()
+
+        WorkManager.getInstance(context).enqueue(workRequest)
     }
 
     fun enqueueBatch(items: List<MediaItem>) {

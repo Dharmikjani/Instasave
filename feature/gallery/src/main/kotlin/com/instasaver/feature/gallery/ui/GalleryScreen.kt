@@ -39,6 +39,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -193,6 +197,10 @@ fun GalleryScreen(
         }
 
         previewPhotoItem?.let { item ->
+            var scale by remember { mutableFloatStateOf(1f) }
+            var offsetX by remember { mutableFloatStateOf(0f) }
+            var offsetY by remember { mutableFloatStateOf(0f) }
+
             Dialog(onDismissRequest = { previewPhotoItem = null }) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
@@ -208,26 +216,54 @@ fun GalleryScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "@${item.creatorName}",
-                                color = TextPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp
-                            )
+                            Column {
+                                Text(
+                                    text = "@${item.creatorName}",
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                Text("Pinch to zoom • Drag to pan", color = TextSecondary, fontSize = 11.sp)
+                            }
                             IconButton(onClick = { previewPhotoItem = null }) {
                                 Icon(Icons.Default.Clear, contentDescription = "Close", tint = TextSecondary)
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        AsyncImage(
-                            model = item.uri,
-                            contentDescription = "Photo Preview",
-                            contentScale = ContentScale.Fit,
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
                                 .clip(RoundedCornerShape(12.dp))
-                        )
+                                .background(Color.Black)
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        scale = (scale * zoom).coerceIn(1f, 5f)
+                                        if (scale > 1f) {
+                                            val maxOffset = (scale - 1f) * 300f
+                                            offsetX = (offsetX + pan.x).coerceIn(-maxOffset, maxOffset)
+                                            offsetY = (offsetY + pan.y).coerceIn(-maxOffset, maxOffset)
+                                        } else {
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                        }
+                                    }
+                                }
+                        ) {
+                            AsyncImage(
+                                model = item.uri,
+                                contentDescription = "Photo Preview",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = scale
+                                        scaleY = scale
+                                        translationX = offsetX
+                                        translationY = offsetY
+                                    }
+                            )
+                        }
                         Spacer(modifier = Modifier.height(14.dp))
                         Button(
                             onClick = {

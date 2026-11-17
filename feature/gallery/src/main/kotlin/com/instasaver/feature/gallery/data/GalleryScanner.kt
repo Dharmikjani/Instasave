@@ -2,7 +2,9 @@ package com.instasaver.feature.gallery.data
 
 import android.content.ContentUris
 import android.content.Context
+import android.net.Uri
 import android.provider.MediaStore
+import com.instasaver.core.database.DatabaseRepository
 import com.instasaver.core.model.LocalSavedItem
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -12,7 +14,8 @@ import javax.inject.Singleton
 
 @Singleton
 class GalleryScanner @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val databaseRepository: DatabaseRepository
 ) {
 
     suspend fun loadSavedMedia(): List<LocalSavedItem> = withContext(Dispatchers.IO) {

@@ -33,6 +33,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -42,6 +45,7 @@ import com.instasaver.feature.watchlist.ui.theme.AmoledBlack
 import com.instasaver.feature.watchlist.ui.theme.DarkSurface
 import com.instasaver.feature.watchlist.ui.theme.DarkSurfaceElevated
 import com.instasaver.feature.watchlist.ui.theme.IgPink
+import com.instasaver.feature.watchlist.ui.theme.SuccessGreen
 import com.instasaver.feature.watchlist.ui.theme.TextMuted
 import com.instasaver.feature.watchlist.ui.theme.TextPrimary
 import com.instasaver.feature.watchlist.ui.theme.TextSecondary
@@ -53,6 +57,7 @@ fun WatchlistScreen(
     viewModel: WatchlistViewModel = hiltViewModel()
 ) {
     val creators by viewModel.creators.collectAsState()
+    val haptic = LocalHapticFeedback.current
 
     Box(modifier = modifier.fillMaxSize().background(AmoledBlack)) {
         if (creators.isEmpty()) {
@@ -110,20 +115,35 @@ fun WatchlistScreen(
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onCreatorClick(username) }
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onCreatorClick(username)
+                            }
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(14.dp)
                         ) {
                             Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(DarkSurfaceElevated),
-                                contentAlignment = Alignment.Center
+                                modifier = Modifier.size(44.dp)
                             ) {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = IgPink)
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(CircleShape)
+                                        .background(DarkSurfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Person, contentDescription = null, tint = IgPink)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .align(Alignment.BottomEnd)
+                                        .clip(CircleShape)
+                                        .background(SuccessGreen)
+                                        .border(2.dp, DarkSurface, CircleShape)
+                                )
                             }
 
                             Spacer(modifier = Modifier.width(12.dp))
@@ -136,13 +156,16 @@ fun WatchlistScreen(
                                     fontSize = 15.sp
                                 )
                                 Text(
-                                    text = "Tap to explore reels & stories",
+                                    text = "Active in Watchlist • Ghost Mode Ready",
                                     color = TextSecondary,
                                     fontSize = 11.sp
                                 )
                             }
 
-                            IconButton(onClick = { viewModel.onIntent(WatchlistUiIntent.RemoveCreator(username)) }) {
+                            IconButton(onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.onIntent(WatchlistUiIntent.RemoveCreator(username))
+                            }) {
                                 Icon(
                                     Icons.Default.BookmarkRemove,
                                     contentDescription = "Remove",

@@ -62,6 +62,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -96,6 +98,7 @@ fun DownloaderScreen(
     viewModel: DownloaderViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     var inputUrl by remember { mutableStateOf(sharedUrl ?: "") }
     var detectedClipboardUrl by remember { mutableStateOf<String?>(null) }
     var isPlayingVideo by remember { mutableStateOf(false) }
@@ -181,6 +184,7 @@ fun DownloaderScreen(
 
                             Button(
                                 onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     try {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         val clip = clipboard.primaryClip
@@ -235,6 +239,7 @@ fun DownloaderScreen(
 
                         Button(
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (inputUrl.isNotBlank()) {
                                     viewModel.onIntent(DownloaderUiIntent.FetchUrl(inputUrl))
                                 } else {
@@ -277,7 +282,13 @@ fun DownloaderScreen(
                 }
             }
 
-            if (currentMedia != null) {
+            if (isLoading) {
+                item {
+                    com.instasaver.feature.downloader.ui.components.DownloaderShimmerSkeleton()
+                }
+            }
+
+            if (currentMedia != null && !isLoading) {
                 item {
                     MediaPreviewCard(
                         media = currentMedia,
@@ -539,6 +550,28 @@ fun MediaPreviewCard(
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (media.thumbnailUrl.isNotBlank()) {
+                        Button(
+                            onClick = {
+                                val coverItem = media.copy(
+                                    id = "${media.shortcode}_cover",
+                                    type = MediaType.POST_IMAGE,
+                                    downloadUrl = media.thumbnailUrl,
+                                    title = "Cover - ${media.authorUsername}"
+                                )
+                                onDownloadMedia(coverItem, media.thumbnailUrl)
+                                Toast.makeText(context, "Saving Cover Image...", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated)
+                        ) {
+                            Icon(Icons.Default.Image, contentDescription = null, tint = IgPink, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Save Cover", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
                     if (media.audioTrack != null || media.type == MediaType.REEL || media.type == MediaType.POST_VIDEO) {
                         Button(
                             onClick = { onDownloadAudio(media) },
@@ -548,7 +581,7 @@ fun MediaPreviewCard(
                         ) {
                             Icon(Icons.Default.Audiotrack, contentDescription = null, tint = IgOrange, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Audio (M4A)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Audio (M4A)", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -564,7 +597,7 @@ fun MediaPreviewCard(
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, tint = IgPurple, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Copy Caption", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Copy Caption", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

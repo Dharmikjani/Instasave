@@ -48,6 +48,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -444,6 +450,10 @@ fun HdDpDialog(
     onDismiss: () -> Unit,
     onDownload: () -> Unit
 ) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -456,13 +466,42 @@ fun HdDpDialog(
             ) {
                 Text("HD Profile Picture", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text("@${profile.username}", color = IgPink, fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(16.dp))
-                AsyncImage(
-                    model = profile.hdAvatarUrl,
-                    contentDescription = "HD DP",
-                    modifier = Modifier.size(240.dp).clip(CircleShape).border(3.dp, StoryRingGradient, CircleShape),
-                    contentScale = ContentScale.Crop
-                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Pinch to zoom • Drag to pan", color = TextSecondary, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(
+                    modifier = Modifier
+                        .size(240.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black)
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                scale = (scale * zoom).coerceIn(1f, 5f)
+                                if (scale > 1f) {
+                                    val maxOffset = (scale - 1f) * 300f
+                                    offsetX = (offsetX + pan.x).coerceIn(-maxOffset, maxOffset)
+                                    offsetY = (offsetY + pan.y).coerceIn(-maxOffset, maxOffset)
+                                } else {
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                }
+                            }
+                        }
+                ) {
+                    AsyncImage(
+                        model = profile.hdAvatarUrl,
+                        contentDescription = "HD DP",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                translationX = offsetX
+                                translationY = offsetY
+                            },
+                        contentScale = ContentScale.Fit
+                    )
+                }
                 Spacer(modifier = Modifier.height(20.dp))
                 Button(
                     onClick = onDownload,

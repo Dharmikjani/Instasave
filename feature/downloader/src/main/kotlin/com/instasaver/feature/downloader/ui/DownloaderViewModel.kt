@@ -3,8 +3,7 @@ package com.instasaver.feature.downloader.ui
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.instasaver.core.database.dao.WatchlistDao
-import com.instasaver.core.database.entity.CreatorEntity
+import com.instasaver.core.database.DatabaseRepository
 import com.instasaver.core.extractor.ExtractorRepository
 import com.instasaver.core.model.AudioTrack
 import com.instasaver.core.model.DownloadProgress
@@ -12,12 +11,10 @@ import com.instasaver.core.model.MediaItem
 import com.instasaver.core.model.MediaType
 import com.instasaver.feature.downloader.work.DownloadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface DownloaderUiState {
@@ -39,7 +36,7 @@ sealed interface DownloaderUiIntent {
 class DownloaderViewModel @Inject constructor(
     private val extractorRepository: ExtractorRepository,
     private val downloadRepository: DownloadRepository,
-    private val watchlistDao: WatchlistDao
+    private val databaseRepository: DatabaseRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<DownloaderUiState>(DownloaderUiState.Idle)
@@ -105,9 +102,7 @@ class DownloaderViewModel @Inject constructor(
     private fun pinCreator(username: String) {
         viewModelScope.launch {
             if (username.isNotBlank()) {
-                withContext(Dispatchers.IO) {
-                    watchlistDao.insert(CreatorEntity(username = username))
-                }
+                databaseRepository.pinCreator(username)
             }
         }
     }

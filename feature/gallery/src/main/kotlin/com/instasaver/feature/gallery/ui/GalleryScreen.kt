@@ -85,10 +85,6 @@ fun GalleryScreen(
 
     val uiState by viewModel.uiState.collectAsState()
 
-    LaunchedEffect(Unit) {
-        viewModel.onIntent(GalleryUiIntent.LoadMedia)
-    }
-
     val isLoading = uiState is GalleryUiState.Loading
     val successState = uiState as? GalleryUiState.Success
     val items = successState?.allItems ?: emptyList()

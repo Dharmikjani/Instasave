@@ -64,7 +64,8 @@ class DatabaseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getCachedProfile(username: String, maxAgeMillis: Long): ProfileData? = withContext(Dispatchers.IO) {
-        val entity = profileCacheDao.getProfile(username.lowercase()) ?: return@withContext null
+        val clean = username.trim().removePrefix("@").lowercase()
+        val entity = profileCacheDao.getProfile(clean) ?: return@withContext null
         val now = System.currentTimeMillis()
         if (now - entity.cachedAt > maxAgeMillis) {
             return@withContext null
@@ -78,10 +79,11 @@ class DatabaseRepositoryImpl @Inject constructor(
 
     override suspend fun saveProfileCache(username: String, profileData: ProfileData): Unit = withContext(Dispatchers.IO) {
         try {
+            val clean = username.trim().removePrefix("@").lowercase()
             val jsonStr = json.encodeToString(profileData)
             profileCacheDao.insert(
                 ProfileCacheEntity(
-                    username = username.lowercase(),
+                    username = clean,
                     profileJson = jsonStr,
                     cachedAt = System.currentTimeMillis()
                 )
@@ -103,15 +105,18 @@ class DatabaseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun isPinned(username: String): Boolean = withContext(Dispatchers.IO) {
-        watchlistDao.isPinned(username.lowercase())
+        val clean = username.trim().removePrefix("@").lowercase()
+        watchlistDao.isPinned(clean)
     }
 
     override suspend fun pinCreator(username: String): Unit = withContext(Dispatchers.IO) {
-        watchlistDao.insert(CreatorEntity(username.lowercase()))
+        val clean = username.trim().removePrefix("@").lowercase()
+        watchlistDao.insert(CreatorEntity(clean))
     }
 
     override suspend fun unpinCreator(username: String): Unit = withContext(Dispatchers.IO) {
-        watchlistDao.delete(username.lowercase())
+        val clean = username.trim().removePrefix("@").lowercase()
+        watchlistDao.delete(clean)
     }
 
     override fun observeDownloadHistory(): Flow<List<DownloadHistoryEntity>> {

@@ -120,7 +120,13 @@ class GalleryScanner @Inject constructor(
         list.sortedByDescending { it.dateAdded }
     }
 
+    private val creatorRegex = Regex("^Insta_(.+?)_\\d{8}_\\d{6}_")
+
     private fun extractCreator(filename: String): String {
+        val match = creatorRegex.find(filename)
+        if (match != null && match.groupValues.size > 1) {
+            return match.groupValues[1]
+        }
         val parts = filename.removePrefix("Insta_").split("_")
         return if (parts.isNotEmpty()) parts[0] else "unknown"
     }

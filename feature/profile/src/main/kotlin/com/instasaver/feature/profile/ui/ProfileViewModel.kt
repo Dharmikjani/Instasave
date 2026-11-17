@@ -84,24 +84,39 @@ class ProfileViewModel @Inject constructor(
 
     private fun downloadItem(item: MediaItem) {
         viewModelScope.launch {
-            storageService.saveMediaToGallery(
+            val result = storageService.saveMediaToGallery(
                 downloadUrl = item.downloadUrl,
                 authorUsername = item.authorUsername,
                 shortcode = item.shortcode,
                 mediaType = item.type
             )
+            result.onSuccess { uri ->
+                databaseRepository.recordDownload(
+                    shortcode = item.shortcode,
+                    fileName = item.title.ifBlank { "Media by @${item.authorUsername}" },
+                    savedUri = uri.toString()
+                )
+            }
         }
     }
 
     private fun downloadBatch(items: List<MediaItem>) {
         viewModelScope.launch {
             for (item in items) {
-                storageService.saveMediaToGallery(
+                val result = storageService.saveMediaToGallery(
                     downloadUrl = item.downloadUrl,
                     authorUsername = item.authorUsername,
                     shortcode = item.shortcode,
                     mediaType = item.type
                 )
+                result.onSuccess { uri ->
+                    databaseRepository.recordDownload(
+                        shortcode = item.shortcode,
+                        fileName = item.title.ifBlank { "Media by @${item.authorUsername}" },
+                        savedUri = uri.toString()
+                    )
+                }
+                kotlinx.coroutines.delay(350)
             }
         }
     }

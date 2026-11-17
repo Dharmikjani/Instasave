@@ -287,11 +287,12 @@ object InstagramExtractor {
     private fun shortcodeToMediaId(shortcode: String): String? {
         return try {
             val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-            var n = 0L
+            var n = java.math.BigInteger.ZERO
+            val sixtyFour = java.math.BigInteger.valueOf(64L)
             for (char in shortcode) {
                 val idx = alphabet.indexOf(char)
                 if (idx == -1) return null
-                n = n * 64 + idx
+                n = n.multiply(sixtyFour).add(java.math.BigInteger.valueOf(idx.toLong()))
             }
             n.toString()
         } catch (e: Exception) {

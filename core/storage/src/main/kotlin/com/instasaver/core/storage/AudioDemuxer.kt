@@ -69,8 +69,10 @@ class AudioDemuxer @Inject constructor() {
             try { extractor.release() } catch (e: Exception) {}
             try {
                 muxer?.stop()
+            } catch (_: Exception) {}
+            try {
                 muxer?.release()
-            } catch (e: Exception) {}
+            } catch (_: Exception) {}
         }
     }
 }

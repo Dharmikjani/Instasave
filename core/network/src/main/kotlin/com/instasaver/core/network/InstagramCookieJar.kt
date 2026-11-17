@@ -5,19 +5,20 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class InstagramCookieJar @Inject constructor() : CookieJar {
 
-    private val cookieStore = ConcurrentHashMap<String, MutableList<Cookie>>()
+    private val cookieStore = ConcurrentHashMap<String, CopyOnWriteArrayList<Cookie>>()
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         val host = url.host
-        cookieStore.getOrPut(host) { mutableListOf() }.addAll(cookies)
-        cookieStore.getOrPut("instagram.com") { mutableListOf() }.addAll(cookies)
-        cookieStore.getOrPut("www.instagram.com") { mutableListOf() }.addAll(cookies)
+        cookieStore.getOrPut(host) { CopyOnWriteArrayList() }.addAll(cookies)
+        cookieStore.getOrPut("instagram.com") { CopyOnWriteArrayList() }.addAll(cookies)
+        cookieStore.getOrPut("www.instagram.com") { CopyOnWriteArrayList() }.addAll(cookies)
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
@@ -80,8 +81,8 @@ class InstagramCookieJar @Inject constructor() : CookieJar {
                 list.add(cookie)
             }
         }
-        cookieStore["instagram.com"] = list
-        cookieStore["www.instagram.com"] = list
+        cookieStore["instagram.com"] = CopyOnWriteArrayList(list)
+        cookieStore["www.instagram.com"] = CopyOnWriteArrayList(list)
 
         // Also push to Android CookieManager
         try {

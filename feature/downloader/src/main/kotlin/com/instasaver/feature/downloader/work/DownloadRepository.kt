@@ -39,6 +39,8 @@ class DownloadRepository @Inject constructor(
     val downloadStates: StateFlow<Map<String, DownloadProgress>> = _downloadStates.asStateFlow()
 
     private val progressMap = ConcurrentHashMap<String, DownloadProgress>()
+    private val lastUpdateTimeMap = ConcurrentHashMap<String, Long>()
+    private val lastProgressMap = ConcurrentHashMap<String, Float>()
 
     fun enqueueDownload(
         item: MediaItem,
@@ -56,7 +58,8 @@ class DownloadRepository @Inject constructor(
                         progress = 0f,
                         bytesDownloaded = 0,
                         totalBytes = 0
-                    )
+                    ),
+                    force = true
                 )
 
                 val targetUrl = customUrl ?: item.downloadUrl
@@ -87,7 +90,8 @@ class DownloadRepository @Inject constructor(
                             bytesDownloaded = 0,
                             totalBytes = 0,
                             isCompleted = true
-                        )
+                        ),
+                        force = true
                     )
                     databaseRepository.recordDownload(
                         shortcode = item.shortcode,
@@ -107,7 +111,8 @@ class DownloadRepository @Inject constructor(
                             bytesDownloaded = 0,
                             totalBytes = 0,
                             error = errorMsg
-                        )
+                        ),
+                        force = true
                     )
                     withContext(Dispatchers.Main) {
                         onError(errorMsg)
@@ -150,8 +155,17 @@ class DownloadRepository @Inject constructor(
         }
     }
 
-    private fun updateProgress(progress: DownloadProgress) {
-        progressMap[progress.mediaId] = progress
-        _downloadStates.value = progressMap.toMap()
+    private fun updateProgress(progress: DownloadProgress, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val lastTime = lastUpdateTimeMap[progress.mediaId] ?: 0L
+        val lastProgress = lastProgressMap[progress.mediaId] ?: -1f
+
+        val delta = kotlin.math.abs(progress.progress - lastProgress)
+        if (force || progress.isCompleted || progress.error != null || delta >= 0.01f || (now - lastTime) >= 100L) {
+            lastUpdateTimeMap[progress.mediaId] = now
+            lastProgressMap[progress.mediaId] = progress.progress
+            progressMap[progress.mediaId] = progress
+            _downloadStates.value = progressMap.toMap()
+        }
     }
 }

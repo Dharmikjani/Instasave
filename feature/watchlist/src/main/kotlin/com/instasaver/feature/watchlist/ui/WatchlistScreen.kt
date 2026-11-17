@@ -125,16 +125,22 @@ fun WatchlistScreen(
                             modifier = Modifier.padding(14.dp)
                         ) {
                             Box(
-                                modifier = Modifier.size(44.dp)
+                                modifier = Modifier.size(46.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(44.dp)
+                                        .size(46.dp)
                                         .clip(CircleShape)
-                                        .background(DarkSurfaceElevated),
+                                        .background(DarkSurfaceElevated)
+                                        .border(1.5.dp, IgPink, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Person, contentDescription = null, tint = IgPink)
+                                    Text(
+                                        text = username.trim().removePrefix("@").take(1).uppercase(),
+                                        color = IgPink,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    )
                                 }
                                 Box(
                                     modifier = Modifier

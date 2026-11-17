@@ -1,6 +1,7 @@
 package com.instasaver.feature.profile.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -277,6 +279,38 @@ fun ProfileExplorerScreen(
                             )
                         }
 
+                        if (profile.externalUrl.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable {
+                                    try {
+                                        val rawUrl = profile.externalUrl.trim()
+                                        val targetUrl = if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
+                                            "https://$rawUrl"
+                                        } else {
+                                            rawUrl
+                                        }
+                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                                        context.startActivity(browserIntent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Link, contentDescription = "Website", tint = InfoBlue, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = profile.externalUrl,
+                                    color = InfoBlue,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(14.dp))
 
                         Row(
@@ -384,6 +418,28 @@ fun ProfileExplorerScreen(
                                         modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(16.dp)
                                     )
                                 }
+
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.Black.copy(alpha = 0.65f),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(4.dp)
+                                        .size(28.dp)
+                                        .clickable {
+                                            viewModel.onIntent(ProfileUiIntent.DownloadItem(item))
+                                            Toast.makeText(context, "Queued for download!", Toast.LENGTH_SHORT).show()
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Download,
+                                            contentDescription = "Quick Download",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -438,28 +494,96 @@ fun ProfileExplorerScreen(
         }
 
         if (showDownloadAllSheet && profileData != null) {
+            val reelsList = profileData.reels.filter { it.type == MediaType.REEL || it.type == MediaType.POST_VIDEO }
+            val postsList = profileData.posts.filter { it.type == MediaType.POST_IMAGE }
+            val carouselsList = (profileData.posts + profileData.reels).filter { it.type == MediaType.CAROUSEL }
             val allMedia = profileData.reels + profileData.posts
+
             ModalBottomSheet(
                 onDismissRequest = { showDownloadAllSheet = false },
                 containerColor = DarkSurfaceElevated
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text("Download ${allMedia.size} Media Items", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("All fetched posts and reels from @${profileData.username} will be saved into your gallery.", color = TextSecondary, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(16.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Bulk Download Media", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Select which media category to download from @${profileData.username}:", color = TextSecondary, fontSize = 13.sp)
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Option 1: Download All Reels
                     Button(
                         onClick = {
-                            viewModel.onIntent(ProfileUiIntent.DownloadBatch(allMedia))
-                            Toast.makeText(context, "Queued all items for download!", Toast.LENGTH_SHORT).show()
+                            if (reelsList.isNotEmpty()) {
+                                viewModel.onIntent(ProfileUiIntent.DownloadBatch(reelsList))
+                                Toast.makeText(context, "Queued ${reelsList.size} Reels for download!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "No reels found for this creator", Toast.LENGTH_SHORT).show()
+                            }
                             showDownloadAllSheet = false
                         },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IgPink),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Start Batch Download (${allMedia.size})", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("🎬 Download All Reels (${reelsList.size} items)", fontWeight = FontWeight.Bold, color = Color.White)
                     }
+
+                    // Option 2: Download All Posts (Photos)
+                    Button(
+                        onClick = {
+                            if (postsList.isNotEmpty()) {
+                                viewModel.onIntent(ProfileUiIntent.DownloadBatch(postsList))
+                                Toast.makeText(context, "Queued ${postsList.size} Posts for download!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "No photo posts found for this creator", Toast.LENGTH_SHORT).show()
+                            }
+                            showDownloadAllSheet = false
+                        },
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("📸 Download All Posts (${postsList.size} items)", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    // Option 3: Download All Carousels
+                    Button(
+                        onClick = {
+                            if (carouselsList.isNotEmpty()) {
+                                viewModel.onIntent(ProfileUiIntent.DownloadBatch(carouselsList))
+                                Toast.makeText(context, "Queued ${carouselsList.size} Carousels for download!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "No carousels found for this creator", Toast.LENGTH_SHORT).show()
+                            }
+                            showDownloadAllSheet = false
+                        },
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("📑 Download All Carousels (${carouselsList.size} items)", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    // Option 4: Download Everything
+                    if (allMedia.isNotEmpty()) {
+                        Button(
+                            onClick = {
+                                viewModel.onIntent(ProfileUiIntent.DownloadBatch(allMedia))
+                                Toast.makeText(context, "Queued all ${allMedia.size} items for download!", Toast.LENGTH_SHORT).show()
+                                showDownloadAllSheet = false
+                            },
+                            modifier = Modifier.fillMaxWidth().height(46.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("⚡ Download Everything (${allMedia.size} items)", fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }

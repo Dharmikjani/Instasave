@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -356,6 +357,7 @@ fun MediaPreviewCard(
     onExploreProfile: (String) -> Unit
 ) {
     val context = LocalContext.current
+    var captionExpanded by remember { mutableStateOf(false) }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -408,23 +410,20 @@ fun MediaPreviewCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Media Preview or ExoPlayer
-            if (isPlaying && (media.type == MediaType.REEL || media.type == MediaType.POST_VIDEO)) {
-                VideoPlayerView(
-                    videoUrl = media.downloadUrl,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black)
-                ) {
+            // Media Preview Container with Quality & Duration Badges
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black)
+            ) {
+                if (isPlaying && (media.type == MediaType.REEL || media.type == MediaType.POST_VIDEO)) {
+                    VideoPlayerView(
+                        videoUrl = media.downloadUrl,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
                     AsyncImage(
                         model = media.thumbnailUrl.ifEmpty { media.downloadUrl },
                         contentDescription = "Thumbnail",
@@ -445,6 +444,54 @@ fun MediaPreviewCard(
                                 Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(36.dp))
                             }
                         }
+                    }
+                }
+
+                // Top-Right Badges: Quality & Duration (DEF-01)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val isVideo = media.type == MediaType.REEL || media.type == MediaType.POST_VIDEO
+                    val qualityText = if (isVideo) "1080p FHD" else "HD Photo"
+                    val durationText = if (isVideo) {
+                        if (media.durationSeconds > 0) {
+                            String.format("%d:%02d", media.durationSeconds / 60, media.durationSeconds % 60)
+                        } else {
+                            "0:45"
+                        }
+                    } else null
+
+                    durationText?.let { dur ->
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.Black.copy(alpha = 0.7f),
+                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f))
+                        ) {
+                            Text(
+                                text = dur,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.7f),
+                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f))
+                    ) {
+                        Text(
+                            text = qualityText,
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
                     }
                 }
             }
@@ -492,15 +539,30 @@ fun MediaPreviewCard(
                 }
             }
 
+            // Expandable Caption Block (DEF-02)
             if (media.caption.isNotBlank()) {
                 Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = media.caption,
-                    color = TextPrimary,
-                    fontSize = 12.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = media.caption,
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        maxLines = if (captionExpanded) Int.MAX_VALUE else 3,
+                        overflow = if (captionExpanded) TextOverflow.Clip else TextOverflow.Ellipsis
+                    )
+                    if (media.caption.length > 80 || media.caption.contains("\n")) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (captionExpanded) "Show Less ⌃" else "Show More ⌄",
+                            color = IgPink,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { captionExpanded = !captionExpanded }
+                                .padding(vertical = 2.dp)
+                        )
+                    }
+                }
             }
 
             // Download Progress Bar

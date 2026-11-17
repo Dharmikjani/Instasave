@@ -105,13 +105,22 @@ fun GalleryScreen(
     Box(modifier = modifier.fillMaxSize().background(AmoledBlack)) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Saved Downloads", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("(${items.size})", color = IgPink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Spacer(modifier = Modifier.weight(1f))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Saved Downloads", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("(${items.size})", color = IgPink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Movies/InstaSaver • Pictures/InstaSaver",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+                }
                 IconButton(onClick = { viewModel.onIntent(GalleryUiIntent.LoadMedia) }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = IgPink)
                 }

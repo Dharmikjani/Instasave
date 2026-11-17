@@ -22,8 +22,20 @@ object ProfileScraper {
 
     private val STATS_PATTERN = Pattern.compile("([0-9.,]+[KMBkmb]?)\\s*Followers,\\s*([0-9.,]+[KMBkmb]?)\\s*Following,\\s*([0-9.,]+)\\s*Posts", Pattern.CASE_INSENSITIVE)
 
+    fun sanitizeUsername(input: String): String {
+        var clean = input.trim()
+        if (clean.contains("instagram.com/")) {
+            clean = clean.substringAfter("instagram.com/")
+        } else if (clean.contains("instagr.am/")) {
+            clean = clean.substringAfter("instagr.am/")
+        }
+        clean = clean.substringBefore("?")
+        clean = clean.substringBefore("/")
+        return clean.removePrefix("@").trim().lowercase()
+    }
+
     suspend fun getProfile(usernameInput: String): Result<ProfileData> = withContext(Dispatchers.IO) {
-        val cleanUsername = usernameInput.trim().removePrefix("@").lowercase()
+        val cleanUsername = sanitizeUsername(usernameInput)
         if (cleanUsername.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Please enter a valid Instagram username"))
         }

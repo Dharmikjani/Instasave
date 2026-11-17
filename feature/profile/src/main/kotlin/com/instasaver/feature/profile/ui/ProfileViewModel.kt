@@ -52,8 +52,20 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
+    private fun sanitizeInput(input: String): String {
+        var clean = input.trim()
+        if (clean.contains("instagram.com/")) {
+            clean = clean.substringAfter("instagram.com/")
+        } else if (clean.contains("instagr.am/")) {
+            clean = clean.substringAfter("instagr.am/")
+        }
+        clean = clean.substringBefore("?")
+        clean = clean.substringBefore("/")
+        return clean.removePrefix("@").trim().lowercase()
+    }
+
     private fun searchProfile(username: String) {
-        val clean = username.trim().removePrefix("@")
+        val clean = sanitizeInput(username)
         if (clean.isBlank()) {
             _uiState.value = ProfileUiState.Error("Please enter a valid Instagram username.")
             return
@@ -72,7 +84,7 @@ class ProfileViewModel @Inject constructor(
     }
 
     private fun togglePin(username: String) {
-        val clean = username.trim().removePrefix("@")
+        val clean = sanitizeInput(username)
         viewModelScope.launch {
             val currentlyPinned = databaseRepository.isPinned(clean)
             if (currentlyPinned) {

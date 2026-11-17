@@ -13,7 +13,7 @@ class ProfileRepositoryImpl @Inject constructor(
 ) : ProfileRepository {
 
     override suspend fun getProfile(username: String): Result<ProfileData> {
-        val cleanUser = username.trim().removePrefix("@").lowercase()
+        val cleanUser = ProfileScraper.sanitizeUsername(username)
         if (cleanUser.isNotBlank()) {
             // Check Tier 0 Cache (6h TTL) - only return if it has meaningful data
             val cached = databaseRepository.getCachedProfile(cleanUser)
